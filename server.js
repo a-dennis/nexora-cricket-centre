@@ -175,6 +175,23 @@ async function handle(req, res) {
     await store.tcreate({ id, name, keyHash: sha(key) });
     return send(res, 201, { id, name, orgKey: key, calendarPath: '/t/' + id });
   }
+  if ((mt = p.match(/^\/api\/matches\/([a-z0-9]{6,12})\/backup$/)) && req.method === 'GET') {
+    const ip = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
+    if (badAuth(ip)) return send(res, 429, { error: 'Too many failed attempts. Try again later.' });
+    const m = await store.get(mt[1]);
+    if (!m) return send(res, 404, { error: 'Match not found' });
+    if (!keyEq(req.headers['x-scorer-key'], m.keyHash)) { noteBad(ip); return send(res, 403, { error: 'Only the scorer link can download the match backup.' }); }
+    return send(res, 200, { format: 'cricket-backup', version: 1, exportedAt: new Date().toISOString(), storage: store.kind, counts: { matches: 1, tournaments: 0 }, tournaments: [], matches: [{ id: m.id, config: m.config, events: m.events, keyHash: m.keyHash, rev: m.rev, updated: m.updated }] });
+  }
+  if ((mt = p.match(/^\/api\/tournaments\/([a-z0-9]{6,12})\/backup$/)) && req.method === 'GET') {
+    const ip = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
+    if (badAuth(ip)) return send(res, 429, { error: 'Too many failed attempts. Try again later.' });
+    const t = await store.tget(mt[1]);
+    if (!t) return send(res, 404, { error: 'Tournament not found' });
+    if (!keyEq(req.headers['x-org-key'], t.keyHash)) { noteBad(ip); return send(res, 403, { error: 'Only the organiser link can download the tournament backup.' }); }
+    const ms = await store.byTournament(t.id);
+    return send(res, 200, { format: 'cricket-backup', version: 1, exportedAt: new Date().toISOString(), storage: store.kind, counts: { matches: ms.length, tournaments: 1 }, tournaments: [{ id: t.id, name: t.name, keyHash: t.keyHash }], matches: ms.map((m) => ({ id: m.id, config: m.config, events: m.events, keyHash: m.keyHash, rev: m.rev, updated: m.updated })) });
+  }
   if ((mt = p.match(/^\/api\/tournaments\/([a-z0-9]{6,12})$/)) && req.method === 'GET') {
     const t = await store.tget(mt[1]);
     if (!t) return send(res, 404, { error: 'Tournament not found' });
