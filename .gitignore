@@ -1,0 +1,4 @@
+node_modules
+shots
+e2e.js
+*.log
