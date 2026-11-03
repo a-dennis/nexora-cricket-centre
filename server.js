@@ -31,6 +31,10 @@ function makeStore() {
       async tcount() { await tready; const r = await pool.query('SELECT count(*)::int AS n FROM cricket_tournaments'); return r.rows[0].n; },
       async byTournament(tid) { await ready; const r = await pool.query("SELECT * FROM cricket_matches WHERE config->>'tid'=$1 ORDER BY created_at LIMIT 300", [tid]); return r.rows.map(row); },
       async setConfig(id, config) { await ready; await pool.query('UPDATE cricket_matches SET config=$1 WHERE id=$2', [JSON.stringify(config), id]); },
+      async allMatches() { await ready; const r = await pool.query('SELECT * FROM cricket_matches ORDER BY created_at'); return r.rows.map((x) => Object.assign(row(x), { created: x.created_at })); },
+      async allTournaments() { await tready; const r = await pool.query('SELECT * FROM cricket_tournaments ORDER BY created_at'); return r.rows.map((x) => ({ id: x.id, name: x.name, keyHash: x.key_hash, created: x.created_at })); },
+      async importMatch(m) { await ready; const r = await pool.query('INSERT INTO cricket_matches(id,config,events,key_hash,rev,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (id) DO NOTHING', [m.id, JSON.stringify(m.config), JSON.stringify(m.events), m.keyHash, m.rev, m.created || m.updated, m.updated]); return r.rowCount === 1; },
+      async importTournament(t) { await tready; const r = await pool.query('INSERT INTO cricket_tournaments(id,name,key_hash,created_at) VALUES($1,$2,$3,$4) ON CONFLICT (id) DO NOTHING', [t.id, t.name, t.keyHash, t.created || new Date().toISOString()]); return r.rowCount === 1; },
       async update(id, events, expectRev) {
         await ready;
         const r = await pool.query('UPDATE cricket_matches SET events=$1, rev=rev+1, updated_at=now() WHERE id=$2 AND rev=$3 RETURNING rev', [JSON.stringify(events), id, expectRev]);
@@ -57,6 +61,10 @@ function makeStore() {
     async tcount() { return Object.keys(tdb).length; },
     async byTournament(tid) { return Object.values(db).filter((m) => m.config && m.config.tid === tid).map((m) => JSON.parse(JSON.stringify(m))); },
     async setConfig(id, config) { if (db[id]) { db[id].config = config; save(); } },
+    async allMatches() { return Object.values(db).map((m) => JSON.parse(JSON.stringify(m))); },
+    async allTournaments() { return Object.values(tdb).map((t) => Object.assign({}, t)); },
+    async importMatch(m) { if (db[m.id]) return false; db[m.id] = { id: m.id, config: m.config, events: m.events, keyHash: m.keyHash, rev: m.rev, updated: m.updated }; save(); return true; },
+    async importTournament(t) { if (tdb[t.id]) return false; tdb[t.id] = { id: t.id, name: t.name, keyHash: t.keyHash }; tsave(); return true; },
     async update(id, events, expectRev) { const m = db[id]; if (!m || m.rev !== expectRev) return false; m.events = events; m.rev++; m.updated = new Date().toISOString(); save(); return true; },
   };
 }
@@ -76,9 +84,9 @@ function send(res, code, obj, headers) {
   res.writeHead(code, Object.assign({ 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }, headers || {}));
   res.end(body);
 }
-function readBody(req) {
+function readBody(req, max) {
   return new Promise((resolve, reject) => {
-    let b = ''; req.on('data', (c) => { b += c; if (b.length > 20000) { reject(Object.assign(new Error('Too large'), { user: true })); req.destroy(); } });
+    let b = ''; req.on('data', (c) => { b += c; if (b.length > (max || 20000)) { reject(Object.assign(new Error('Too large'), { user: true })); req.destroy(); } });
     req.on('end', () => { try { resolve(b ? JSON.parse(b) : {}); } catch (e) { reject(Object.assign(new Error('Bad JSON'), { user: true })); } });
     req.on('error', reject);
   });
@@ -102,6 +110,9 @@ function summary(m) {
     innings: st.innings.filter((i) => i.balls > 0).map((i) => ({ team: i.batName, runs: i.runs, wkts: i.wkts, overs: i.overs })),
     result: st.result ? st.result.text : null, status: m.events.length === 0 ? 'new' : (st.result ? 'done' : 'live') };
 }
+const bad = new Map();
+function badAuth(ip) { const now = Date.now(); return (bad.get(ip) || []).filter((t) => now - t < 3600e3).length >= 10; }
+function noteBad(ip) { const now = Date.now(); const a = (bad.get(ip) || []).filter((t) => now - t < 3600e3); a.push(now); bad.set(ip, a); }
 const MAX_TOURNAMENTS = 100, MAX_PER_TOURNAMENT = 200;
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.json': 'application/json', '.webmanifest': 'application/manifest+json' };
 const STATIC_OK = new Set(['index.html']);
@@ -121,6 +132,38 @@ async function handle(req, res) {
   if (p === '/healthz') return send(res, 200, { ok: true, storage: store.kind });
   if (p === '/api/info') return send(res, 200, { storage: store.kind });
   let mt;
+  if (p === '/api/backup' || p === '/api/restore') {
+    // Owner-only. Disabled unless BACKUP_TOKEN is set. Backups contain match data and hashed keys, never raw keys.
+    const tok = process.env.BACKUP_TOKEN;
+    if (!tok || tok.length < 24) return send(res, 404, { error: 'Unknown API' });
+    const ip = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
+    if (badAuth(ip)) return send(res, 429, { error: 'Too many failed attempts. Try again later.' });
+    if (!keyEq(req.headers['x-backup-token'], sha(tok))) { noteBad(ip); return send(res, 403, { error: 'Not allowed' }); }
+    if (p === '/api/backup' && req.method === 'GET') {
+      const [ms, ts] = [await store.allMatches(), await store.allTournaments()];
+      return send(res, 200, { format: 'cricket-backup', version: 1, exportedAt: new Date().toISOString(), storage: store.kind,
+        counts: { matches: ms.length, tournaments: ts.length }, tournaments: ts, matches: ms });
+    }
+    if (p === '/api/restore' && req.method === 'POST') {
+      const body = await readBody(req, 5e6);
+      if (!body || body.format !== 'cricket-backup' || body.version !== 1 || !Array.isArray(body.matches) || !Array.isArray(body.tournaments)) return send(res, 400, { error: 'Not a valid backup file' });
+      const idOk = (x) => typeof x === 'string' && /^[a-z0-9]{6,12}$/.test(x), hashOk = (x) => typeof x === 'string' && /^[a-f0-9]{64}$/.test(x);
+      const out = { tournaments: { added: 0, skipped: 0, rejected: 0 }, matches: { added: 0, skipped: 0, rejected: 0 } };
+      for (const t of body.tournaments) {
+        if (!t || !idOk(t.id) || !hashOk(t.keyHash) || !engine.cleanName(t.name, 40)) { out.tournaments.rejected++; continue; }
+        (await store.importTournament({ id: t.id, name: engine.cleanName(t.name, 40), keyHash: t.keyHash, created: t.created })) ? out.tournaments.added++ : out.tournaments.skipped++;
+      }
+      for (const m of body.matches) {
+        let ok = m && idOk(m.id) && hashOk(m.keyHash) && Array.isArray(m.events) && m.events.length <= 800 && m.config && typeof m.config === 'object';
+        let cfg = null;
+        if (ok) { try { cfg = Object.assign(engine.normalizeConfig(m.config), { date: cleanDate(m.config.date) }); if (idOk(m.config.tid)) cfg.tid = m.config.tid; engine.replay(cfg, m.events); } catch (e) { ok = false; } }
+        if (!ok) { out.matches.rejected++; continue; }
+        (await store.importMatch({ id: m.id, config: cfg, events: m.events, keyHash: m.keyHash, rev: Number.isInteger(m.rev) ? m.rev : m.events.length, updated: m.updated || new Date().toISOString(), created: m.created })) ? out.matches.added++ : out.matches.skipped++;
+      }
+      return send(res, 200, out);
+    }
+    return send(res, 405, { error: 'Method not allowed' });
+  }
   if (req.method === 'POST' && p === '/api/tournaments') {
     const ip = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
     if (limited(ip)) return send(res, 429, { error: 'Too many requests from this connection. Try again later.' });
