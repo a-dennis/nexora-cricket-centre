@@ -303,6 +303,17 @@ function dlBackup(url,hd,nm){
 
 /* ---------- tournaments (saved on this device) ---------- */
 function tList(){try{return JSON.parse(localStorage.getItem('ct_list')||'[]').filter(function(t){return t&&t.id&&t.key})}catch(e){return[]}}
+function refreshNames(){
+  var raw;try{raw=JSON.parse(localStorage.getItem('ct_list')||'[]')}catch(e){return}
+  if(!Array.isArray(raw))return;
+  raw.forEach(function(t){if(!t||!t.id)return;
+    fetch('/api/tournaments/'+encodeURIComponent(t.id)).then(function(r){return r.ok?r.json():null}).then(function(j){
+      if(!j||!j.name||j.name===t.name)return;
+      try{var cur=JSON.parse(localStorage.getItem('ct_list')||'[]');cur.forEach(function(x){if(x&&x.id===t.id)x.name=j.name});localStorage.setItem('ct_list',JSON.stringify(cur))}catch(e){}
+      Array.prototype.forEach.call(document.querySelectorAll('.trow'),function(r){var l=r.querySelector('a');if(l&&l.getAttribute('href')==='/t/'+t.id){var b=r.querySelector('b');if(b)b.textContent=j.name}});
+      Array.prototype.forEach.call(document.querySelectorAll('#tsel option'),function(o){if(o.value===t.id)o.textContent=j.name});
+    }).catch(function(){})});
+}
 function tSave(t){try{var l=tList().filter(function(x){return x.id!==t.id});l.push(t);localStorage.setItem('ct_list',JSON.stringify(l))}catch(e){}}
 function pad2(n){return(n<10?'0':'')+n}
 function todayStr(){var d=new Date();return d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate())}
@@ -326,7 +337,7 @@ function home(){
   '<label>Max overs per bowler</label><select id="mob"><option value="0">No limit</option>'+[1,2,3,4,5].map(function(n){return '<option>'+n+'</option>'}).join('')+'</select>'+
     '<div class="mut">All out = players minus one wickets. Ties are shown as ties (no super over).</div>'+
   '<button class="btn pri" id="go" style="margin-top:16px">Create match</button></div>'+tourCard()+FOOT;
-  wireTour();
+  wireTour();refreshNames();
   document.getElementById('go').onclick=function(){
     var b=this;b.disabled=true;
     var lines=function(s){return document.getElementById(s).value.split('\n').map(function(x){return x.trim()}).filter(Boolean)};
