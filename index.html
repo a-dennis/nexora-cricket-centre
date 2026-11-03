@@ -1,0 +1,305 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0a0f24">
+<title>Cricket Centre</title>
+<meta name="description" content="Live ball-by-ball scoreboard">
+<style>
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+:root{--bg:#0a0f24;--card:#141b3f;--line:#2c3a7a;--mut:#9fb0d8;--g:#1fe0a0;--b:#12a3d8;--p:#7a5cff;--r:#ff5470;--a:#ffc857}
+body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;color:#fff;background:radial-gradient(520px 380px at 90% -5%,#1fe0a044,transparent),radial-gradient(440px 400px at -10% 25%,#6a4dff44,transparent),var(--bg);background-attachment:fixed;min-height:100vh}
+.wrap{max-width:520px;margin:0 auto;padding:18px 16px 90px}
+.top{display:flex;justify-content:space-between;align-items:center;font-size:12px;color:var(--mut);letter-spacing:.4px;gap:8px}
+.top b{color:#fff;font-size:14px}
+.demo{background:#ffb02033;color:var(--a);border:1px solid #ffb02088;padding:3px 9px;border-radius:20px;font-size:10px;font-weight:800;letter-spacing:1px;white-space:nowrap}
+h1{font-size:13px;color:#b9c6ee;font-weight:600;margin:16px 0 8px}
+h2{font-size:20px;margin:14px 0 4px}
+.card{background:linear-gradient(160deg,#1a2350,#121a3d);border:1px solid var(--line);border-radius:22px;padding:16px 18px;box-shadow:0 12px 30px #0008;margin-bottom:12px}
+.row{display:flex;justify-content:space-between;align-items:center;gap:10px}
+.team{display:flex;align-items:center;gap:10px;font-weight:800;font-size:17px;min-width:0}
+.team span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.logo{width:40px;height:40px;border-radius:13px;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:15px;flex:none}
+.l0{background:linear-gradient(135deg,#1fe0a0,#12a3d8);color:#06222b}.l1{background:linear-gradient(135deg,#ff8a3d,#ff3d77);color:#2a0a14}
+.score{font-size:38px;font-weight:900;letter-spacing:-1px;white-space:nowrap}.score small{font-size:15px;color:var(--mut);font-weight:600;letter-spacing:0}
+.sub{color:var(--mut);font-size:12px;margin-top:2px}
+.live{display:inline-flex;align-items:center;gap:6px;color:var(--r);font-weight:800;font-size:12px;letter-spacing:1.5px}
+.live i{width:8px;height:8px;border-radius:50%;background:var(--r);box-shadow:0 0 10px var(--r);animation:pulse 1.4s infinite}
+@keyframes pulse{50%{opacity:.35}}
+.chip{display:inline-block;padding:7px 11px;border-radius:12px;background:#ffffff12;font-size:12px;font-weight:700;margin:0 5px 5px 0;white-space:nowrap}
+.green{color:var(--g)}.amber{color:var(--a)}.red{color:var(--r)}
+.balls{display:flex;gap:7px;flex-wrap:wrap;margin-top:10px}
+.ball{min-width:34px;height:34px;padding:0 6px;border-radius:17px;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:13px;background:#ffffff14;border:1px solid #ffffff22}
+.b4{background:var(--b);border-color:var(--b)}.b6{background:var(--p);border-color:var(--p)}.bw{background:#ff3d5e;border-color:#ff3d5e}.bx{background:#ffc85733;border-color:#ffc857aa;color:var(--a)}.b0{color:#8a98c4}.bn{opacity:.3}
+.tbl{width:100%;border-collapse:collapse;font-size:13px}.tbl td,.tbl th{padding:8px 3px;text-align:right}.tbl td:first-child,.tbl th:first-child{text-align:left}.tbl th{color:#7f90c4;font-size:11px;font-weight:600}.tbl tr+tr td{border-top:1px solid #ffffff10}
+.tabs{display:flex;gap:6px;margin:14px 0 4px;background:#ffffff0d;padding:4px;border-radius:14px}
+.tabs button{flex:1;background:none;border:0;color:var(--mut);font-weight:700;font-size:13px;padding:9px;border-radius:11px;cursor:pointer}
+.tabs button.on{background:#ffffff1c;color:#fff}
+.btn{display:flex;align-items:center;justify-content:center;border:0;border-radius:16px;font-weight:900;font-size:20px;height:58px;color:#fff;cursor:pointer;font-family:inherit;width:100%}
+.btn:active{transform:scale(.97)}.btn[disabled]{opacity:.45}
+.g0{background:#ffffff14}.g1{background:#ffffff1c}.g4{background:linear-gradient(135deg,#12a3d8,#1fe0a0);color:#06222b}.g6{background:linear-gradient(135deg,#7a5cff,#c05cff)}.gw{background:linear-gradient(135deg,#ff3d5e,#ff8a3d)}
+.gx{background:#ffffff0d;font-size:13px;border:1px dashed #ffffff30;height:46px}.gx.on{background:#ffc85733;border:1px solid var(--a);color:var(--a)}
+.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:9px;margin-top:10px}.span2{grid-column:span 2}
+.pri{background:var(--g);color:#05221b;font-size:16px;height:50px}
+.sec{background:#ffffff14;font-size:14px;height:44px}
+.small{height:40px;font-size:12px;font-weight:700;background:#ffffff12;border-radius:12px}
+.foot{text-align:center;font-size:11px;color:#8a98c4;margin-top:20px}.foot b{color:#fff}
+input,select,textarea{width:100%;background:#0d1330;border:1px solid var(--line);color:#fff;border-radius:12px;padding:11px 12px;font:inherit;font-size:15px}
+textarea{min-height:130px;resize:vertical}
+label{display:block;font-size:12px;color:var(--mut);margin:12px 0 5px;font-weight:600}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.bar{height:8px;border-radius:8px;background:#ffffff14;overflow:hidden;margin-top:8px}.bar b{display:block;height:100%;background:linear-gradient(90deg,var(--g),var(--b))}
+.sheet{position:fixed;inset:0;background:#000a;display:flex;align-items:flex-end;justify-content:center;z-index:20}
+.sheet>div{background:#10173a;border:1px solid var(--line);border-radius:24px 24px 0 0;width:100%;max-width:520px;padding:18px 16px 26px;max-height:85vh;overflow:auto}
+.opt{display:block;width:100%;text-align:left;padding:14px 16px;margin-top:8px;border-radius:14px;background:#ffffff12;border:0;color:#fff;font:inherit;font-size:16px;font-weight:700;cursor:pointer}
+.opt:active{background:#ffffff26}.opt.on{background:var(--g);color:#05221b}
+.pills{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}.pills .opt{width:auto;margin:0;padding:10px 14px;font-size:14px}
+.toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:#ff3d5e;color:#fff;padding:11px 16px;border-radius:14px;font-weight:700;font-size:14px;z-index:40;max-width:90vw;text-align:center}
+.toast.ok{background:var(--g);color:#05221b}
+.res{background:linear-gradient(135deg,#1fe0a033,#12a3d833);border:1px solid var(--g);border-radius:18px;padding:14px 16px;font-weight:800;text-align:center;margin-bottom:12px}
+.link{word-break:break-all;font-size:13px;background:#0d1330;border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin:6px 0 8px;color:var(--g)}
+.warn{background:#ffb02022;border:1px solid #ffb02066;color:var(--a);border-radius:14px;padding:10px 12px;font-size:13px;margin:8px 0}
+.stale{color:var(--a)}
+.mut{color:var(--mut);font-size:13px}
+a{color:var(--g)}
+</style></head><body>
+<div class="wrap" id="app"></div>
+<script>
+(function(){
+'use strict';
+var app=document.getElementById('app');
+var path=location.pathname;
+var mm=path.match(/^\/(m|s)\/([a-z0-9]+)/);
+var mode=mm?mm[1]:'home', id=mm?mm[2]:null;
+var S=null, key=null, tab='live', busy=false, extra='', sheet=null, lastOk=0, err=null, polling=null, info={storage:'?'};
+function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
+function ini(n){var w=String(n).trim().split(/\s+/);return (w.length>1?w[0][0]+w[1][0]:String(n).slice(0,2)).toUpperCase()}
+function toast(m,ok){var t=document.createElement('div');t.className='toast'+(ok?' ok':'');t.textContent=m;document.body.appendChild(t);setTimeout(function(){t.remove()},2600)}
+var FOOT='<div class="foot">Developed by <b>Anthony Dennis</b></div>';
+function api(method,url,body){
+  return fetch(url,{method:method,headers:Object.assign({'content-type':'application/json'},key?{'x-scorer-key':key}:{}),body:body?JSON.stringify(body):undefined}).then(function(r){return r.json().then(function(j){return {ok:r.ok,status:r.status,j:j}})});
+}
+function chipCls(t){if(/^\d*W$/.test(t))return'bw';if(t==='4')return'b4';if(t==='6')return'b6';if(/Wd|Nb|B$|Lb$/.test(t))return'bx';if(t==='0')return'b0';return''}
+function chips(arr,pad){var h='';arr.forEach(function(t){h+='<div class="ball '+chipCls(t)+'">'+esc(t==='0'?'·':t)+'</div>'});for(var i=arr.length;i<(pad||0);i++)h+='<div class="ball bn">·</div>';return h}
+
+/* ---------- HOME ---------- */
+var A='Arjun K.\nVikram P.\nSana M.\nDev R.\nMeera J.\nKabir L.', B='Rahul S.\nNikhil T.\nImran A.\nPriya N.\nRavi D.\nTara B.';
+function home(){
+  app.innerHTML='<div class="top"><b>Cricket Centre</b><span class="demo">FREE TRIAL</span></div>'+
+  '<h2>New match</h2><div class="mut">Someone scores every ball. Everyone else follows live from a share link.</div>'+
+  '<div class="card" style="margin-top:14px"><label>Match title</label><input id="title" value="Practice Match" maxlength="50">'+
+  '<div class="two"><div><label>Overs per innings (max 10)</label><select id="overs">'+[1,2,3,4,5,6,7,8,9,10].map(function(n){return '<option'+(n===6?' selected':'')+'>'+n+'</option>'}).join('')+'</select></div>'+
+  '<div><label>Batting first</label><select id="first"><option value="0">Team 1</option><option value="1">Team 2</option></select></div></div>'+
+  '<div class="two"><div><label>Team 1 name</label><input id="t0" value="Falcons" maxlength="24"></div><div><label>Team 2 name</label><input id="t1" value="Titans" maxlength="24"></div></div>'+
+  '<div class="two"><div><label>Team 1 players (one per line)</label><textarea id="p0">'+esc(A)+'</textarea></div><div><label>Team 2 players (one per line)</label><textarea id="p1">'+esc(B)+'</textarea></div></div>'+
+  '<div class="mut" style="margin-top:6px">Sample names are filled in. Replace them with your own. 2 to 15 players per team.</div>'+
+  '<h1>Rules (you choose)</h1><div class="two"><div><label>Wide penalty runs</label><select id="wd"><option>1</option><option>0</option><option>2</option></select></div><div><label>No-ball penalty runs</label><select id="nb"><option>1</option><option>0</option><option>2</option></select></div></div>'+
+  '<label>Max overs per bowler</label><select id="mob"><option value="0">No limit</option>'+[1,2,3,4,5].map(function(n){return '<option>'+n+'</option>'}).join('')+'</select>'+
+  '<label><input type="checkbox" id="demo" checked style="width:auto;margin-right:8px">Practice match (shows a SAMPLE badge)</label>'+
+  '<div class="mut">All out = players minus one wickets. Ties are shown as ties (no super over). Rules can be changed later.</div>'+
+  '<button class="btn pri" id="go" style="margin-top:16px">Create match</button></div>'+FOOT;
+  document.getElementById('go').onclick=function(){
+    var b=this;b.disabled=true;
+    var lines=function(s){return document.getElementById(s).value.split('\n').map(function(x){return x.trim()}).filter(Boolean)};
+    api('POST','/api/matches',{title:v('title'),overs:+v('overs'),batFirst:+v('first'),wideRun:+v('wd'),nbRun:+v('nb'),maxOversPerBowler:+v('mob'),demo:document.getElementById('demo').checked,
+      teams:[{name:v('t0'),players:lines('p0')},{name:v('t1'),players:lines('p1')}]}).then(function(r){
+      b.disabled=false;
+      if(!r.ok){toast(r.j.error||'Could not create');return}
+      showCreated(r.j);
+    }).catch(function(){b.disabled=false;toast('No connection. Try again.')});
+  };
+}
+function v(i){return document.getElementById(i).value}
+function showCreated(j){
+  var vu=location.origin+j.viewerPath, su=location.origin+j.scorerPath+'#k='+j.scorerKey;
+  try{localStorage.setItem('ck_'+j.id,j.scorerKey)}catch(e){}
+  app.innerHTML='<div class="top"><b>Cricket Centre</b><span class="demo">MATCH READY</span></div><h2>Match created</h2>'+
+  '<div class="card"><h1 style="margin-top:0">1. Share this with everyone (view only)</h1><div class="link" id="vu">'+esc(vu)+'</div>'+
+  '<div class="grid" style="grid-template-columns:1fr 1fr"><button class="btn sec" id="cv">Copy</button><button class="btn sec" id="sv">Share</button></div></div>'+
+  '<div class="card"><h1 style="margin-top:0">2. Scorer link (keep private)</h1><div class="link" id="su">'+esc(su)+'</div>'+
+  '<div class="warn">Anyone with this link can enter scores. Send it only to the person scoring. Save it somewhere safe: if it is lost, nobody can score this match.</div>'+
+  '<div class="grid" style="grid-template-columns:1fr 1fr"><button class="btn sec" id="cs">Copy</button><button class="btn pri" id="os" style="height:44px;font-size:14px">Open scorer</button></div></div>'+
+  (j.storage==='durable'?'':'<div class="warn">Temporary storage: matches may be lost when the app restarts. Fine for a trial.</div>')+FOOT;
+  var cp=function(t){return function(){if(navigator.clipboard){navigator.clipboard.writeText(t).then(function(){toast('Copied',1)},function(){toast('Press and hold the link to copy')})}else toast('Press and hold the link to copy')}};
+  document.getElementById('cv').onclick=cp(vu);document.getElementById('cs').onclick=cp(su);
+  document.getElementById('sv').onclick=function(){if(navigator.share)navigator.share({title:'Live cricket scores',url:vu}).catch(function(){});else cp(vu)()};
+  document.getElementById('os').onclick=function(){location.href=su};
+}
+
+/* ---------- MATCH ---------- */
+function load(first){
+  if(document.hidden&&!first)return;
+  fetch('/api/matches/'+id+(S&&!first?'?rev='+S.rev:'')).then(function(r){return r.json().then(function(j){return{ok:r.ok,j:j}})}).then(function(r){
+    if(!r.ok){err=r.j.error||'Error';if(!S)render();return}
+    err=null;lastOk=Date.now();
+    if(!r.j.unchanged){S=r.j;if(!sheetOpenLock())render()}else if(mode==='m'||mode==='s')tickLabel();
+  }).catch(function(){err='Offline, retrying...';tickLabel()});
+}
+function sheetOpenLock(){return sheet&&sheet.lock&&mode==='s'&&false}
+function tickLabel(){var e=document.getElementById('upd');if(!e)return;var s=Math.round((Date.now()-lastOk)/1000);e.textContent=err?err:(lastOk?'Updated '+(s<5?'just now':s+'s ago'):'');e.className=(err||s>20)?'stale':''}
+function cur(){return S.state.innings[S.state.cur]}
+function head(){
+  var st=S.state,c=S.config;
+  return '<div class="top"><b>'+esc(c.title)+'</b>'+(c.demo?'<span class="demo">SAMPLE / PRACTICE</span>':'<span></span>')+'</div>'+
+  '<div class="sub" style="margin-top:4px">'+c.overs+' overs a side · <span id="upd"></span></div>';
+}
+function scoreCard(){
+  var st=S.state,c=S.config,i=cur(),prev=st.cur===1?st.innings[0]:null;
+  var h='';
+  if(st.result)h+='<div class="res">'+esc(st.result.text)+'</div>';
+  h+='<div class="card"><div class="row">'+(st.result?'<span class="sub">Final</span>':'<span class="live"><i></i>LIVE</span>')+'<span class="sub">'+(st.cur===0?'1st':'2nd')+' innings'+(i.done&&!st.result?' · complete':'')+'</span></div>';
+  [0,1].forEach(function(n){});
+  var showInn=function(inn,dim){
+    return '<div class="row" style="margin-top:14px'+(dim?';opacity:.7':'')+'"><div class="team"><div class="logo l'+inn.bat+'">'+esc(ini(inn.batName))+'</div><span>'+esc(inn.batName)+'</span></div><div class="score">'+inn.runs+'<small>/'+inn.wkts+'</small></div></div><div class="sub" style="text-align:right">'+inn.overs+' / '+c.overs+' overs · RR '+inn.rr.toFixed(2)+'</div>';
+  };
+  if(prev)h+=showInn(prev,true);
+  h+=showInn(i,false);
+  if(!prev&&!st.result){var other=c.teams[1-i.bat].name;
+    h+=(i.projected?'<div class="bar"><b style="width:'+Math.min(100,Math.round(i.balls*100/(c.overs*6)))+'%"></b></div><div class="sub" style="margin-top:6px">Projected <span class="green">'+i.projected+'</span> at current rate</div>':'')+
+       '<div class="sub" style="margin-top:6px">'+esc(other)+' bat next</div>';}
+  if(prev&&!st.result){h+='<div class="sub" style="margin-top:10px;font-size:14px;color:#fff"><b>'+esc(i.batName)+'</b> need <span class="green"><b>'+i.need+'</b></span> from <b>'+i.ballsLeft+'</b> balls'+(i.rrr!==null?' · RRR '+i.rrr.toFixed(2):'')+'</div>'}
+  return h+'</div>';
+}
+function liveTab(){
+  var st=S.state,i=cur(),h=scoreCard();
+  if(!st.result){
+    h+='<h1>This over'+(i.done?'':' ('+i.curOverNo+')')+'</h1><div class="card" style="padding:14px 18px"><div class="row"><b>Over '+i.curOverNo+'</b><span class="sub">'+(i.bowler!==null?'Bowler: '+esc(i.players.bowl[i.bowler]):'Waiting for bowler')+'</span></div><div class="balls">'+chips(i.thisOver,Math.max(6,i.thisOver.length))+'</div></div>';
+    var on=i.batting.filter(function(b){return b.notOut});
+    h+='<h1>At the crease</h1><div class="card" style="padding:6px 18px"><table class="tbl"><tr><th>Batter</th><th>R</th><th>B</th><th>4s</th><th>6s</th></tr>'+
+      (on.length?on.map(function(b){return '<tr><td><b>'+esc(b.name)+'</b>'+(b.onStrike?' <span class="green">●</span>':'')+'</td><td><b>'+b.runs+'</b></td><td>'+b.balls+'</td><td>'+b.fours+'</td><td>'+b.sixes+'</td></tr>'}).join(''):'<tr><td colspan="5" class="mut">Waiting for batters</td></tr>')+'</table></div>';
+  }
+  return h;
+}
+function scorecardTab(){
+  var h='';
+  S.state.innings.forEach(function(i,n){
+    if(!i.batting.length&&n>S.state.cur)return;
+    h+='<h1>'+esc(i.batName)+' · '+i.runs+'/'+i.wkts+' ('+i.overs+' ov)</h1><div class="card" style="padding:6px 18px"><table class="tbl"><tr><th>Batter</th><th>R</th><th>B</th><th>4s</th><th>6s</th><th>SR</th></tr>'+
+    i.batting.map(function(b){return '<tr><td><b>'+esc(b.name)+'</b><div class="sub">'+esc(b.notOut?'not out':b.out)+'</div></td><td><b>'+b.runs+'</b></td><td>'+b.balls+'</td><td>'+b.fours+'</td><td>'+b.sixes+'</td><td>'+b.sr+'</td></tr>'}).join('')+
+    '<tr><td>Extras<div class="sub">wd '+i.extras.wd+', nb '+i.extras.nb+', b '+i.extras.b+', lb '+i.extras.lb+'</div></td><td><b>'+i.extrasTotal+'</b></td><td colspan="4"></td></tr></table>'+
+    (i.yetToBat.length&&!i.done?'<div class="sub" style="padding:6px 0 10px">Yet to bat: '+esc(i.yetToBat.map(function(y){return y.name}).join(', '))+'</div>':'')+'</div>';
+    if(i.bowling.length)h+='<h1>Bowling · '+esc(i.bowlName)+'</h1><div class="card" style="padding:6px 18px"><table class="tbl"><tr><th>Bowler</th><th>O</th><th>M</th><th>R</th><th>W</th><th>Econ</th></tr>'+
+      i.bowling.map(function(b){return '<tr><td>'+esc(b.name)+'</td><td>'+b.overs+'</td><td>'+b.maidens+'</td><td>'+b.runs+'</td><td class="'+(b.wkts?'red':'')+'"><b>'+b.wkts+'</b></td><td>'+b.econ.toFixed(1)+'</td></tr>'}).join('')+'</table></div>';
+    if(i.fow.length)h+='<div class="sub" style="margin:-4px 4px 10px">Fall of wickets: '+esc(i.fow.map(function(f){return f.runs+'/'+f.wkts+' ('+f.name+', '+f.over+' ov)'}).join(' · '))+'</div>';
+  });
+  return h;
+}
+function oversTab(){
+  var h='';
+  S.state.innings.forEach(function(i){
+    var all=i.overHistory.slice();
+    if(i.thisOver.length)all.push({n:i.curOverNo,bowler:i.bowler!==null?i.players.bowl[i.bowler]:'',balls:i.thisOver,runs:null});
+    if(!all.length)return;
+    h+='<h1>'+esc(i.batName)+' innings</h1>'+all.slice().reverse().map(function(o){return '<div class="card" style="padding:12px 16px"><div class="row"><b>Over '+o.n+'</b><span class="sub">'+esc(o.bowler)+(o.runs!==null?' · '+o.runs+' runs':'')+'</span></div><div class="balls">'+chips(o.balls)+'</div></div>'}).join('');
+  });
+  return h||'<div class="mut" style="margin-top:14px">No balls bowled yet.</div>';
+}
+function tabsHtml(){return '<div class="tabs">'+[['live','Live'],['card','Scorecard'],['overs','Overs']].map(function(t){return '<button data-t="'+t[0]+'" class="'+(tab===t[0]?'on':'')+'">'+t[1]+'</button>'}).join('')+'</div>'}
+function viewerBody(){return tab==='live'?liveTab():tab==='card'?scorecardTab():oversTab()}
+
+function render(){
+  if(!S){app.innerHTML=(err?'<div class="warn" style="margin-top:30px">'+esc(err)+'</div>':'<div class="mut" style="margin-top:40px;text-align:center">Loading match...<br>The free server may take up to a minute to wake up.</div>')+FOOT;return}
+  var h=head()+tabsHtml()+viewerBody();
+  if(mode==='s')h+=scorerPanel();
+  else{h+='<div class="card" style="margin-top:6px"><button class="btn sec" id="share">Share this live scoreboard</button></div>'}
+  h+=FOOT;app.innerHTML=h;tickLabel();wire();
+  if(mode==='s')openNeeds();
+}
+function wire(){
+  Array.prototype.forEach.call(document.querySelectorAll('.tabs button'),function(b){b.onclick=function(){tab=b.getAttribute('data-t');render()}});
+  var sh=document.getElementById('share');
+  if(sh)sh.onclick=function(){var u=location.origin+'/m/'+id;if(navigator.share)navigator.share({title:S.config.title,url:u}).catch(function(){});else if(navigator.clipboard)navigator.clipboard.writeText(u).then(function(){toast('Link copied',1)})};
+}
+
+/* ---------- SCORER ---------- */
+function scorerPanel(){
+  if(!key)return '<div class="warn" style="margin-top:14px">This is a view-only link. Open the scorer link you were given to enter scores.</div>';
+  var st=S.state,i=cur();
+  if(st.result)return '<div class="card"><div class="mut">Match finished. Use Undo if the last ball was a mistake.</div><div class="grid" style="grid-template-columns:1fr 1fr"><button class="btn small" id="undo">↶ Undo</button><button class="btn small" id="newm">New match</button></div></div>';
+  var dis=busy||st.needs.length?' disabled':'';
+  var h='<h1>Scorer pad · '+esc(i.batName)+' batting</h1><div class="card" style="padding:12px 14px">';
+  h+='<div class="sub" style="margin-bottom:8px">'+(extra?'Adding: <b class="amber">'+({wd:'Wide',nb:'No ball',b:'Byes',lb:'Leg byes'})[extra]+'</b> · tap runs (0 = none)':'Tap the runs scored off the ball')+'</div>';
+  h+='<div class="grid" style="margin-top:0">';
+  [0,1,2,3].forEach(function(n){h+='<button class="btn '+(n?'g1':'g0')+'" data-r="'+n+'"'+dis+'>'+n+'</button>'});
+  h+='<button class="btn g4" data-r="4"'+dis+'>4</button><button class="btn g6" data-r="6"'+dis+'>6</button><button class="btn gw span2" id="wk"'+dis+'>WICKET</button>';
+  [['wd','Wide'],['nb','No ball'],['b','Bye'],['lb','Leg bye']].forEach(function(e){h+='<button class="btn gx'+(extra===e[0]?' on':'')+'" data-x="'+e[0]+'"'+dis+'>'+e[1]+'</button>'});
+  h+='</div><div class="grid" style="grid-template-columns:repeat(4,1fr)"><button class="btn small" data-r="5"'+dis+'>5 runs</button><button class="btn small" data-r="7"'+dis+'>7 runs</button><button class="btn small" id="undo"'+(busy?' disabled':'')+'>↶ Undo</button><button class="btn small" id="swap"'+dis+'>End innings</button></div></div>';
+  h+='<div class="mut" style="text-align:center">Every tap updates the shared link for viewers</div>';
+  return h;
+}
+function post(url,body){
+  if(busy)return;busy=true;render0();
+  api('POST','/api/matches/'+id+url,Object.assign({rev:S.rev},body||{})).then(function(r){
+    busy=false;
+    if(r.ok){S=r.j;lastOk=Date.now();extra='';sheet=null;}
+    else{if(r.j.match){S=r.j.match;}toast(r.j.error||'Failed')}
+    render();
+  }).catch(function(){busy=false;toast('No connection. Not saved - try again.');render()});
+}
+function render0(){var b=document.querySelectorAll('.btn');Array.prototype.forEach.call(b,function(x){x.disabled=true})}
+document.addEventListener('click',function(e){
+  if(mode!=='s'||!S||!key)return;
+  var t=e.target.closest('button');if(!t)return;
+  var r=t.getAttribute('data-r'),x=t.getAttribute('data-x');
+  if(r!==null&&!t.closest('.sheet')){post('/event',{event:{t:'ball',r:+r,x:extra}});return}
+  if(x){extra=extra===x?'':x;render();return}
+  if(t.id==='undo'){post('/undo');return}
+  if(t.id==='wk'){openWicket();return}
+  if(t.id==='swap'){if(confirm('End this innings now? (For example, time ran out.)'))post('/event',{event:{t:'end'}});return}
+  if(t.id==='newm'){location.href='/'}
+});
+function openSheet(html){closeSheet();var d=document.createElement('div');d.className='sheet';d.id='sheet';d.innerHTML='<div>'+html+'</div>';document.body.appendChild(d);return d}
+function closeSheet(){var s=document.getElementById('sheet');if(s)s.remove()}
+var needKey='';
+function openNeeds(){
+  var st=S.state;if(st.result||!st.needs.length||!key){closeSheet();needKey='';return}
+  var role=st.needs[0],i=cur(),k=role+':'+st.lastBall;
+  if(needKey===k&&document.getElementById('sheet'))return;needKey=k;
+  var title={striker:'Who is on strike?',non:'Who is the non-striker?',newbat:'New batter in',bowler:'Who is bowling the next over?'}[role];
+  var list;
+  if(role==='bowler'){list=i.players.bowl.map(function(n,p){return{p:p,name:n}}).filter(function(o){return o.p!==i.lastBowler});
+    if(S.config.maxOversPerBowler)list=list.filter(function(o){var b=i.bowling.filter(function(x){return x.p===o.p})[0];return !b||parseFloat(b.overs)<S.config.maxOversPerBowler})}
+  else list=i.yetToBat;
+  var d=openSheet('<h2 style="margin-top:0">'+esc(title)+'</h2><div class="mut">'+(st.cur===1&&!i.balls&&role==='striker'?'Second innings: '+esc(i.batName)+' need '+i.target+' to win. ':'')+(role==='bowler'?esc(i.bowlName):esc(i.batName))+'</div>'+list.map(function(o){return '<button class="opt" data-p="'+o.p+'">'+esc(o.name)+'</button>'}).join('')+(list.length?'':'<div class="warn">No eligible player. Use Undo, or change the over limit rule.</div><button class="opt" id="sundo">↶ Undo last ball</button>'));
+  d.onclick=function(e){var b=e.target.closest('button');if(!b)return;if(b.id==='sundo'){post('/undo');return}var p=b.getAttribute('data-p');if(p!==null)post('/event',{event:{t:'sel',role:role,player:+p}})};
+}
+function openWicket(){
+  var i=cur(),kinds=[['bowled','Bowled'],['caught','Caught'],['lbw','LBW'],['stumped','Stumped'],['runout','Run out'],['hitwicket','Hit wicket'],['other','Other']];
+  var w={k:'bowled',who:'s',r:0,f:''};
+  var strN=i.players.bat[i.striker],nonN=i.players.bat[i.non];
+  var d=openSheet('');
+  function draw(){
+    var fielders=i.players.bowl;
+    d.firstChild.innerHTML='<h2 style="margin-top:0">Wicket</h2><div class="mut">'+(extra?'On a '+({wd:'wide',nb:'no ball',b:'bye',lb:'leg bye'})[extra]+'. ':'')+'How was the batter out?</div>'+
+    '<div class="pills">'+kinds.map(function(k){return '<button class="opt'+(w.k===k[0]?' on':'')+'" data-k="'+k[0]+'">'+k[1]+'</button>'}).join('')+'</div>'+
+    '<h1>Who is out?</h1><div class="pills"><button class="opt'+(w.who==='s'?' on':'')+'" data-w="s">'+esc(strN)+' (striker)</button><button class="opt'+(w.who==='n'?' on':'')+'" data-w="n"'+(w.k==='runout'?'':' disabled style="opacity:.35"')+'>'+esc(nonN)+'</button></div>'+
+    (w.k==='runout'?'<h1>Runs completed before the run out</h1><div class="pills">'+[0,1,2,3].map(function(n){return '<button class="opt'+(w.r===n?' on':'')+'" data-n="'+n+'">'+n+'</button>'}).join('')+'</div>':'')+
+    (['caught','stumped','runout'].indexOf(w.k)>=0?'<h1>Fielder (optional)</h1><div class="pills"><button class="opt'+(!w.f?' on':'')+'" data-f="">Skip</button>'+fielders.map(function(n){return '<button class="opt'+(w.f===n?' on':'')+'" data-f="'+esc(n)+'">'+esc(n)+'</button>'}).join('')+'</div>':'')+
+    '<div class="grid" style="grid-template-columns:1fr 1fr;margin-top:16px"><button class="btn sec" data-c="1">Cancel</button><button class="btn gw" data-ok="1" style="font-size:16px">Confirm wicket</button></div>';
+  }
+  draw();
+  d.onclick=function(e){
+    if(e.target===d){closeSheet();return}
+    var b=e.target.closest('button');if(!b||b.disabled)return;
+    if(b.dataset.k){w.k=b.dataset.k;if(w.k!=='runout'){w.who='s';w.r=0}draw()}
+    else if(b.dataset.w){w.who=b.dataset.w;draw()}
+    else if(b.dataset.n!==undefined){w.r=+b.dataset.n;draw()}
+    else if(b.dataset.f!==undefined){w.f=b.dataset.f;draw()}
+    else if(b.dataset.c)closeSheet();
+    else if(b.dataset.ok){closeSheet();post('/event',{event:{t:'ball',r:w.r,x:extra,w:{k:w.k,who:w.who,f:w.f}}})}
+  };
+}
+
+/* ---------- boot ---------- */
+if(mode==='home')home();
+else{
+  if(mode==='s'){
+    var m=location.hash.match(/k=([A-Za-z0-9]+)/);
+    try{if(m){localStorage.setItem('ck_'+id,m[1]);history.replaceState(null,'',location.pathname)}key=localStorage.getItem('ck_'+id)}catch(e){key=m?m[1]:null}
+  }
+  render();load(true);
+  setInterval(load,3000);setInterval(tickLabel,1000);
+  document.addEventListener('visibilitychange',function(){if(!document.hidden)load()});
+}
+})();
+</script></body></html>
