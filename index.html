@@ -63,6 +63,20 @@ label{display:block;font-size:12px;color:var(--mut);margin:12px 0 5px;font-weigh
 .mut{color:var(--mut);font-size:13px}
 a{color:var(--g)}
 
+
+.trow{display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid #ffffff12;font-size:15px}
+.cal{display:grid;grid-template-columns:repeat(7,1fr);gap:6px}
+.dow{text-align:center;font-size:11px;color:#8fa2d6;font-weight:800;padding:4px 0}
+.day{position:relative;aspect-ratio:1;border:0;border-radius:12px;background:#ffffff0a;color:#c9d4f5;font:inherit;font-size:14px;font-weight:700;cursor:pointer}
+.day.has{background:#1fe0a022;color:#fff;box-shadow:inset 0 0 0 1px #1fe0a066}
+.day.today{box-shadow:inset 0 0 0 2px var(--a)}
+.day.sel{background:linear-gradient(135deg,var(--g),var(--b));color:#05221b}
+.day i{position:absolute;right:4px;top:3px;font-size:9px;font-style:normal;background:#05221b;color:var(--g);border-radius:8px;padding:1px 5px}
+.day.sel i{background:#05221b;color:#fff}
+.nav{width:42px;height:42px;border-radius:14px;border:0;background:#ffffff14;color:#fff;font-size:24px;cursor:pointer}
+.mc{display:block;text-decoration:none;color:#fff;background:linear-gradient(160deg,#1c2756,#111838);border:1px solid #34448f;border-radius:18px;padding:14px 16px;margin-bottom:10px;box-shadow:0 8px 20px #0007}
+.mc .row{margin-bottom:4px}.mc b{font-size:15px}
+.badge{font-size:10px;font-weight:800;letter-spacing:1px;background:#1fe0a022;color:var(--g);border:1px solid #1fe0a066;border-radius:20px;padding:3px 9px}.badge.dim{background:#ffffff10;color:var(--mut);border-color:#ffffff22}
 /* polish */
 body{background:radial-gradient(560px 420px at 95% -8%,#1fe0a050,transparent),radial-gradient(500px 460px at -15% 18%,#6a4dff50,transparent),radial-gradient(420px 300px at 60% 105%,#12a3d833,transparent),var(--bg);background-attachment:fixed}
 .wrap{animation:rise .35s ease both}@keyframes rise{from{opacity:0;transform:translateY(8px)}}
@@ -96,24 +110,35 @@ input:focus,select:focus,textarea:focus{border-color:var(--g)}
 'use strict';
 var app=document.getElementById('app');
 var path=location.pathname;
-var mm=path.match(/^\/(m|s)\/([a-z0-9]+)/);
+var mm=path.match(/^\/(m|s|t)\/([a-z0-9]+)/);
 var mode=mm?mm[1]:'home', id=mm?mm[2]:null;
-var S=null, key=null, tab='live', busy=false, extra='', sheet=null, lastOk=0, err=null, polling=null, info={storage:'?'};
+var S=null, T=null, ym=null, selDay=null, key=null, tab='live', busy=false, extra='', sheet=null, lastOk=0, err=null, polling=null, info={storage:'?'};
 function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
 function ini(n){var w=String(n).trim().split(/\s+/);return (w.length>1?w[0][0]+w[1][0]:String(n).slice(0,2)).toUpperCase()}
 function toast(m,ok){var t=document.createElement('div');t.className='toast'+(ok?' ok':'');t.textContent=m;document.body.appendChild(t);setTimeout(function(){t.remove()},2600)}
 var FOOT='<div class="foot">Developed by <b>Anthony Dennis</b></div>';
-function api(method,url,body){
-  return fetch(url,{method:method,headers:Object.assign({'content-type':'application/json'},key?{'x-scorer-key':key}:{}),body:body?JSON.stringify(body):undefined}).then(function(r){return r.json().then(function(j){return {ok:r.ok,status:r.status,j:j}})});
+function api(method,url,body,orgKey){
+  return fetch(url,{method:method,headers:Object.assign({'content-type':'application/json'},key?{'x-scorer-key':key}:{},orgKey?{'x-org-key':orgKey}:{}),body:body?JSON.stringify(body):undefined}).then(function(r){return r.json().then(function(j){return {ok:r.ok,status:r.status,j:j}})});
 }
 function chipCls(t){if(/^\d*W$/.test(t))return'bw';if(t==='4')return'b4';if(t==='6')return'b6';if(/Wd|Nb|B$|Lb$/.test(t))return'bx';if(t==='0')return'b0';return''}
 function chips(arr,pad){var h='';arr.forEach(function(t){h+='<div class="ball '+chipCls(t)+'">'+esc(t==='0'?'·':t)+'</div>'});for(var i=arr.length;i<(pad||0);i++)h+='<div class="ball bn">·</div>';return h}
 
+/* ---------- tournaments (saved on this device) ---------- */
+function tList(){try{return JSON.parse(localStorage.getItem('ct_list')||'[]').filter(function(t){return t&&t.id&&t.key})}catch(e){return[]}}
+function tSave(t){try{var l=tList().filter(function(x){return x.id!==t.id});l.push(t);localStorage.setItem('ct_list',JSON.stringify(l))}catch(e){}}
+function pad2(n){return(n<10?'0':'')+n}
+function todayStr(){var d=new Date();return d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate())}
+var MON=['January','February','March','April','May','June','July','August','September','October','November','December'];
+function niceDate(s){var p=s.split('-');return +p[2]+' '+MON[+p[1]-1].slice(0,3)+' '+p[0]}
+function copyTxt(t){if(navigator.clipboard){navigator.clipboard.writeText(t).then(function(){toast('Copied',1)},function(){toast('Press and hold the link to copy')})}else toast('Press and hold the link to copy')}
+
 /* ---------- HOME ---------- */
 function home(){
+  var qt=(location.search.match(/[?&]t=([a-z0-9]+)/)||[])[1]||'';
   app.innerHTML='<div class="top"><b class="brand"><i class="mark"></i>Cricket Centre</b><span></span></div>'+
   '<div class="hero"><h2>Live cricket scoring</h2><p>Score ball by ball. Share one link for live scores.</p></div>'+
   '<div class="card" style="margin-top:14px"><label>Match title</label><input id="title" placeholder="e.g. Match 1" maxlength="50">'+
+  '<div class="two"><div><label>Match date</label><input id="date" type="date" value="'+todayStr()+'"></div><div><label>Tournament</label><select id="tsel"><option value="">None</option>'+tList().map(function(t){return '<option value="'+esc(t.id)+'"'+(qt===t.id?' selected':'')+'>'+esc(t.name)+'</option>'}).join('')+'</select></div></div>'+
   '<div class="two"><div><label>Overs per innings (max 10)</label><select id="overs">'+[1,2,3,4,5,6,7,8,9,10].map(function(n){return '<option'+(n===6?' selected':'')+'>'+n+'</option>'}).join('')+'</select></div>'+
   '<div><label>Batting first</label><select id="first"><option value="0">Team 1</option><option value="1">Team 2</option></select></div></div>'+
   '<div class="two"><div><label>Team 1 name</label><input id="t0" placeholder="Team 1" maxlength="24"></div><div><label>Team 2 name</label><input id="t1" placeholder="Team 2" maxlength="24"></div></div>'+
@@ -122,12 +147,14 @@ function home(){
   '<h1>Rules</h1><div class="two"><div><label>Wide penalty runs</label><select id="wd"><option>1</option><option>0</option><option>2</option></select></div><div><label>No-ball penalty runs</label><select id="nb"><option>1</option><option>0</option><option>2</option></select></div></div>'+
   '<label>Max overs per bowler</label><select id="mob"><option value="0">No limit</option>'+[1,2,3,4,5].map(function(n){return '<option>'+n+'</option>'}).join('')+'</select>'+
     '<div class="mut">All out = players minus one wickets. Ties are shown as ties (no super over).</div>'+
-  '<button class="btn pri" id="go" style="margin-top:16px">Create match</button></div>'+FOOT;
+  '<button class="btn pri" id="go" style="margin-top:16px">Create match</button></div>'+tourCard()+FOOT;
+  wireTour();
   document.getElementById('go').onclick=function(){
     var b=this;b.disabled=true;
     var lines=function(s){return document.getElementById(s).value.split('\n').map(function(x){return x.trim()}).filter(Boolean)};
-    api('POST','/api/matches',{title:v('title'),overs:+v('overs'),batFirst:+v('first'),wideRun:+v('wd'),nbRun:+v('nb'),maxOversPerBowler:+v('mob'),demo:false,
-      teams:[{name:v('t0'),players:lines('p0')},{name:v('t1'),players:lines('p1')}]}).then(function(r){
+    var ts=tList().filter(function(t){return t.id===v('tsel')})[0];
+    api('POST','/api/matches',{date:v('date'),tournament:ts?ts.id:undefined,title:v('title'),overs:+v('overs'),batFirst:+v('first'),wideRun:+v('wd'),nbRun:+v('nb'),maxOversPerBowler:+v('mob'),demo:false,
+      teams:[{name:v('t0'),players:lines('p0')},{name:v('t1'),players:lines('p1')}]},ts?ts.key:null).then(function(r){
       b.disabled=false;
       if(!r.ok){toast(r.j.error||'Could not create');return}
       showCreated(r.j);
@@ -135,6 +162,79 @@ function home(){
   };
 }
 function v(i){return document.getElementById(i).value}
+function tourCard(){
+  var l=tList(),h='<h1>Tournament calendar</h1><div class="card"><div class="mut">Group matches by date so anyone with the calendar link can look back at past scores.</div>';
+  l.forEach(function(t){h+='<div class="trow"><b>'+esc(t.name)+'</b><span><a href="/t/'+esc(t.id)+'">Calendar</a></span></div>'});
+  h+='<label>New tournament name</label><input id="tname" maxlength="40" placeholder="Tournament name"><button class="btn sec" id="tgo" style="margin-top:10px">Create tournament calendar</button></div>';
+  return h;
+}
+function wireTour(){
+  var g=document.getElementById('tgo');if(!g)return;
+  g.onclick=function(){
+    g.disabled=true;
+    api('POST','/api/tournaments',{name:v('tname')}).then(function(r){
+      g.disabled=false;
+      if(!r.ok){toast(r.j.error||'Could not create');return}
+      tSave({id:r.j.id,name:r.j.name,key:r.j.orgKey});showTour(r.j);
+    }).catch(function(){g.disabled=false;toast('No connection. Try again.')});
+  };
+}
+function showTour(j){
+  var cu=location.origin+j.calendarPath, ou=location.origin+j.calendarPath+'#o='+j.orgKey;
+  app.innerHTML='<div class="top"><b class="brand"><i class="mark"></i>Cricket Centre</b><span></span></div><h2>'+esc(j.name)+'</h2>'+
+  '<div class="card"><h1 style="margin-top:0">1. Calendar link (share with everyone, view only)</h1><div class="link">'+esc(cu)+'</div><button class="btn sec" id="cc">Copy</button></div>'+
+  '<div class="card"><h1 style="margin-top:0">2. Organiser link (keep private)</h1><div class="link">'+esc(ou)+'</div>'+
+  '<div class="warn">Anyone with this link can add matches to this calendar. Keep it with the organisers and save it somewhere safe. It is also remembered on this device.</div><button class="btn sec" id="co">Copy</button></div>'+
+  '<button class="btn pri" id="oc">Open calendar</button><div style="height:10px"></div><button class="btn sec" id="am">Add a match</button>'+FOOT;
+  document.getElementById('cc').onclick=function(){copyTxt(cu)};document.getElementById('co').onclick=function(){copyTxt(ou)};
+  document.getElementById('oc').onclick=function(){location.href=cu};document.getElementById('am').onclick=function(){location.href='/?t='+j.id};
+}
+
+/* ---------- TOURNAMENT CALENDAR ---------- */
+function loadT(first){
+  if(document.hidden&&!first)return;
+  fetch('/api/tournaments/'+id).then(function(r){return r.json().then(function(j){return{ok:r.ok,j:j}})}).then(function(r){
+    if(!r.ok){err=r.j.error||'Error';if(!T)renderT();return}
+    err=null;var sig=JSON.stringify(r.j);if(T&&T._sig===sig)return;T=r.j;T._sig=sig;
+    if(!ym){var ds=T.matches.map(function(m){return m.date}).filter(Boolean).sort();var last=ds.length?ds[ds.length-1]:todayStr();ym=last.slice(0,7);if(ds.length&&selDay===null)selDay=last}
+    renderT();
+  }).catch(function(){if(!T){err='No connection';renderT()}});
+}
+function shiftMonth(d){var p=ym.split('-'),y=+p[0],m=+p[1]-1+d;y+=Math.floor(m/12);m=((m%12)+12)%12;ym=y+'-'+pad2(m+1);selDay=null;renderT()}
+function matchCard(m){
+  var st=m.status==='live'?'<span class="live"><i></i>LIVE</span>':m.status==='done'?'<span class="badge">FINAL</span>':'<span class="badge dim">NOT STARTED</span>';
+  var inn=m.innings.map(function(i){return '<div class="row"><span>'+esc(i.team)+'</span><b>'+i.runs+'/'+i.wkts+' <small class="mut">('+esc(i.overs)+' ov)</small></b></div>'}).join('')||'<div class="mut">'+esc(m.teams[0])+' v '+esc(m.teams[1])+'</div>';
+  return '<a class="mc" href="/m/'+esc(m.id)+'"><div class="row"><b>'+esc(m.title)+'</b>'+st+'</div>'+inn+(m.result?'<div class="sub green" style="margin-top:6px">'+esc(m.result)+'</div>':'')+(m.date?'<div class="sub">'+esc(niceDate(m.date))+'</div>':'')+'</a>';
+}
+function renderT(){
+  if(!T){app.innerHTML='<div class="top"><b class="brand"><i class="mark"></i>Cricket Centre</b><span></span></div>'+(err?'<div class="warn" style="margin-top:30px">'+esc(err)+'</div>':'<div class="mut" style="margin-top:40px;text-align:center">Loading calendar...<br>The free server may take up to a minute to wake up.</div>')+FOOT;return}
+  var by={};T.matches.forEach(function(m){if(m.date)(by[m.date]=by[m.date]||[]).push(m)});
+  var p=ym.split('-'),y=+p[0],mo=+p[1]-1,first=new Date(y,mo,1).getDay(),dim=new Date(y,mo+1,0).getDate(),today=todayStr();
+  var h='<div class="top"><b class="brand"><i class="mark"></i>Cricket Centre</b><span></span></div><div class="hero"><h2>'+esc(T.name)+'</h2><p>Pick a date to see its match scores.</p></div>';
+  h+='<div class="card"><div class="row" style="margin-bottom:10px"><button class="nav" id="pm" aria-label="Previous month">‹</button><b style="font-size:17px">'+MON[mo]+' '+y+'</b><button class="nav" id="nm" aria-label="Next month">›</button></div><div class="cal">';
+  ['S','M','T','W','T','F','S'].forEach(function(d){h+='<div class="dow">'+d+'</div>'});
+  for(var i=0;i<first;i++)h+='<div></div>';
+  for(var d=1;d<=dim;d++){var ds=y+'-'+pad2(mo+1)+'-'+pad2(d),n=(by[ds]||[]).length;
+    h+='<button class="day'+(n?' has':'')+(ds===selDay?' sel':'')+(ds===today?' today':'')+'" data-d="'+ds+'" aria-label="'+d+' '+MON[mo]+(n?', '+n+' match'+(n>1?'es':''):'')+'">'+d+(n?'<i>'+n+'</i>':'')+'</button>'}
+  h+='</div></div>';
+  var list=selDay?(by[selDay]||[]):null,own=tList().filter(function(t){return t.id===id})[0];
+  if(selDay){h+='<h1>'+niceDate(selDay)+'</h1>'+(list.length?list.map(matchCard).join(''):'<div class="card mut">No matches on this date.</div>')}
+  else{var mm2=T.matches.filter(function(m){return m.date&&m.date.slice(0,7)===ym}).sort(function(a,b){return a.date<b.date?1:-1});h+='<h1>'+MON[mo]+' '+y+'</h1>'+(mm2.length?mm2.map(matchCard).join(''):'<div class="card mut">No matches this month.</div>')}
+  if(own)h+='<button class="btn pri" id="addm" style="margin-top:6px">Add a match</button>';
+  h+=FOOT;app.innerHTML=h;
+  document.getElementById('pm').onclick=function(){shiftMonth(-1)};document.getElementById('nm').onclick=function(){shiftMonth(1)};
+  Array.prototype.forEach.call(document.querySelectorAll('.day'),function(b){b.onclick=function(){selDay=selDay===b.dataset.d?null:b.dataset.d;renderT()}});
+  var a=document.getElementById('addm');if(a)a.onclick=function(){location.href='/?t='+id};
+}
+function attachCard(){
+  var l=tList();if(mode!=='s'||!S||S.inTournament||!l.length)return'';
+  return '<h1>Tournament calendar</h1><div class="card"><div class="two"><div><label>Tournament</label><select id="atn">'+l.map(function(t){return '<option value="'+esc(t.id)+'">'+esc(t.name)+'</option>'}).join('')+'</select></div><div><label>Match date</label><input id="atd" type="date" value="'+esc(S.config.date||todayStr())+'"></div></div><button class="btn sec" id="atg" style="margin-top:10px">Add this match to the calendar</button></div>';
+}
+document.addEventListener('click',function(e){
+  if(!e.target||e.target.id!=='atg')return;
+  var t=tList().filter(function(x){return x.id===document.getElementById('atn').value})[0];if(!t)return;
+  api('POST','/api/matches/'+id+'/attach',{tournament:t.id,date:document.getElementById('atd').value},t.key).then(function(r){if(!r.ok){toast(r.j.error||'Could not add');return}toast('Added to calendar',1);S.inTournament=true;render()});
+});
 function showCreated(j){
   var vu=location.origin+j.viewerPath, su=location.origin+j.scorerPath+'#k='+j.scorerKey;
   try{localStorage.setItem('ck_'+j.id,j.scorerKey)}catch(e){}
@@ -225,7 +325,7 @@ function viewerBody(){return tab==='live'?liveTab():tab==='card'?scorecardTab():
 function render(){
   if(!S){app.innerHTML=(err?'<div class="warn" style="margin-top:30px">'+esc(err)+'</div>':'<div class="mut" style="margin-top:40px;text-align:center">Loading match...<br>The free server may take up to a minute to wake up.</div>')+FOOT;return}
   var h=head()+tabsHtml()+viewerBody();
-  if(mode==='s')h+=scorerPanel();
+  if(mode==='s')h+=scorerPanel()+attachCard();
   else{h+='<div class="card" style="margin-top:6px"><button class="btn sec" id="share">Share this live scoreboard</button></div>'}
   h+=FOOT;app.innerHTML=h;tickLabel();wire();
   if(mode==='s')openNeeds();
@@ -316,6 +416,12 @@ function openWicket(){
 
 /* ---------- boot ---------- */
 if(mode==='home')home();
+else if(mode==='t'){
+  var om=location.hash.match(/o=([A-Za-z0-9]+)/);
+  if(om){history.replaceState(null,'',location.pathname);fetch('/api/tournaments/'+id).then(function(r){return r.json()}).then(function(j){if(j&&j.name){tSave({id:id,name:j.name,key:om[1]});renderT()}})}
+  renderT();loadT(true);setInterval(loadT,15000);
+  document.addEventListener('visibilitychange',function(){if(!document.hidden)loadT()});
+}
 else{
   if(mode==='s'){
     var m=location.hash.match(/k=([A-Za-z0-9]+)/);
