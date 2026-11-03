@@ -190,6 +190,9 @@ a{color:#0b6b9a}
 button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline-color:#7a3cff}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 
+/* fire lettering for tournament names */
+.fire,.hero h2.fire{font-weight:900;letter-spacing:.3px;background:linear-gradient(180deg,#ffb000 0%,#ff6a00 45%,#d4140f 100%);-webkit-background-clip:text;background-clip:text;color:transparent;-webkit-text-fill-color:transparent;-webkit-text-stroke:.5px #8a1a00;filter:drop-shadow(0 0 5px #ff8a0077);animation:flame 2s ease-in-out infinite alternate}
+@keyframes flame{from{filter:drop-shadow(0 0 3px #ff8a0055)}to{filter:drop-shadow(0 0 9px #ffb000bb) drop-shadow(0 -1px 2px #ff3d0055)}}
 /* desktop / laptop layout */
 @media(min-width:900px){
 html:not(.pd) .wrap{max-width:1160px;padding:26px 32px 70px}
@@ -204,7 +207,7 @@ html:not(.pd) .dsk h1{break-after:avoid}
 html:not(.pd) .tcal{display:grid;grid-template-columns:minmax(0,440px) minmax(0,1fr);gap:30px;align-items:start}
 html:not(.pd) .tcal .tr>h1:first-child{margin-top:0}
 html:not(.pd) .wrap>.card{max-width:780px;margin-left:auto;margin-right:auto}
-html:not(.pd) .wrap>.hero{max-width:780px;margin-left:auto;margin-right:auto}
+html:not(.pd) .wrap>.hero:not(.wide){max-width:780px;margin-left:auto;margin-right:auto}
 html:not(.pd) .sheet{align-items:center}html:not(.pd) .sheet>div{border-radius:24px;max-width:560px}
 }
 </style></head><body>
@@ -339,7 +342,7 @@ function home(){
 function v(i){return document.getElementById(i).value}
 function tourCard(){
   var l=tList(),h='<h1>Tournament calendar</h1><div class="card"><div class="mut">Group matches by date so anyone with the calendar link can look back at past scores.</div>';
-  l.forEach(function(t){h+='<div class="trow"><b>'+esc(t.name)+'</b><span><a href="/t/'+esc(t.id)+'">Calendar</a></span></div>'});
+  l.forEach(function(t){h+='<div class="trow"><b class="fire">'+esc(t.name)+'</b><span><a href="/t/'+esc(t.id)+'">Calendar</a></span></div>'});
   h+='<label>New tournament name</label><input id="tname" maxlength="40" placeholder="Tournament name"><button class="btn sec" id="tgo" style="margin-top:10px">Create tournament calendar</button></div>';
   return h;
 }
@@ -385,7 +388,7 @@ function renderT(){
   if(!T){app.innerHTML='<div class="top"><b class="brand"><i class="mark"></i>Cricket Centre</b><span></span></div>'+(err?'<div class="warn" style="margin-top:30px">'+esc(err)+'</div>':'<div class="mut" style="margin-top:40px;text-align:center">Loading calendar...<br>The free server may take up to a minute to wake up.</div>')+FOOT;return}
   var by={};T.matches.forEach(function(m){if(m.date)(by[m.date]=by[m.date]||[]).push(m)});
   var p=ym.split('-'),y=+p[0],mo=+p[1]-1,first=new Date(y,mo,1).getDay(),dim=new Date(y,mo+1,0).getDate(),today=todayStr();
-  var h='<div class="top"><b class="brand"><i class="mark"></i>Cricket Centre</b><span></span></div><div class="hero"><h2>'+esc(T.name)+'</h2><p>Pick a date to see its match scores.</p></div>';
+  var h='<div class="top"><b class="brand"><i class="mark"></i>Cricket Centre</b><span></span></div><div class="hero wide"><h2 class="fire">'+esc(T.name)+'</h2><p>Pick a date to see its match scores.</p></div>';
   h+='<div class="tcal"><div class="tl"><div class="card"><div class="row" style="margin-bottom:10px"><button class="nav" id="pm" aria-label="Previous month">‹</button><b style="font-size:17px">'+MON[mo]+' '+y+'</b><button class="nav" id="nm" aria-label="Next month">›</button></div><div class="cal">';
   ['S','M','T','W','T','F','S'].forEach(function(d){h+='<div class="dow">'+d+'</div>'});
   for(var i=0;i<first;i++)h+='<div></div>';
