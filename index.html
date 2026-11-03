@@ -123,6 +123,61 @@ function api(method,url,body,orgKey){
 function chipCls(t){if(/^\d*W$/.test(t))return'bw';if(t==='4')return'b4';if(t==='6')return'b6';if(/Wd|Nb|B$|Lb$/.test(t))return'bx';if(t==='0')return'b0';return''}
 function chips(arr,pad){var h='';arr.forEach(function(t){h+='<div class="ball '+chipCls(t)+'">'+esc(t==='0'?'·':t)+'</div>'});for(var i=arr.length;i<(pad||0);i++)h+='<div class="ball bn">·</div>';return h}
 
+
+/* ---------- downloadable match report (offline HTML, no keys) ---------- */
+function buildReport(S){
+  var c=S.config,st=S.state,E=esc;
+  var rules='Wide: '+c.wideRun+' run'+(c.wideRun===1?'':'s')+' · No ball: '+c.nbRun+' run'+(c.nbRun===1?'':'s')+' · '+(c.maxOversPerBowler?('Max '+c.maxOversPerBowler+' over'+(c.maxOversPerBowler>1?'s':'')+' per bowler'):'No bowler over limit')+' · Ties are recorded as ties';
+  var started=st.innings.filter(function(i){return i.balls>0});
+  var status=st.result?E(st.result.text):(started.length?'Match in progress when this report was saved':'Match not started');
+  var html='<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>'+E(c.title)+' - Match report</title><style>'+
+  '*{box-sizing:border-box}body{margin:0;background:#e9edf7;color:#16204a;font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;padding:24px 12px}'+
+  '.sheet{max-width:860px;margin:0 auto;background:#fff;border-radius:22px;overflow:hidden;box-shadow:0 20px 60px #1a235033}'+
+  '.hd{background:radial-gradient(500px 300px at 95% -10%,#1fe0a055,transparent),radial-gradient(420px 320px at -10% 10%,#7a5cff66,transparent),#0a0f24;color:#fff;padding:28px 30px 24px}'+
+  '.brand{display:flex;align-items:center;gap:10px;font-weight:800;font-size:14px;letter-spacing:.3px;opacity:.95}.mk{width:26px;height:26px;border-radius:9px;background:linear-gradient(135deg,#1fe0a0,#12a3d8);display:inline-block}'+
+  'h1{font-size:30px;margin:16px 0 4px;letter-spacing:-.5px}.meta{color:#b9c6ee;font-size:13px}.res{margin-top:16px;display:inline-block;background:#1fe0a024;border:1px solid #1fe0a0;color:#a8ffe0;border-radius:14px;padding:9px 16px;font-weight:800}'+
+  '.sb{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:20px}.tm{background:#ffffff14;border:1px solid #ffffff26;border-radius:18px;padding:14px 16px}.tm b{display:block;font-size:17px}.tm .sc{font-size:34px;font-weight:900;letter-spacing:-1px}.tm small{color:#b9c6ee;font-size:13px;font-weight:600}'+
+  '.bd{padding:6px 30px 26px}h2{font-size:18px;margin:26px 0 4px;padding-bottom:6px;border-bottom:3px solid #1fe0a0;display:inline-block}h3{font-size:12px;letter-spacing:1.3px;text-transform:uppercase;color:#6a78a8;margin:18px 0 6px}'+
+  'table{width:100%;border-collapse:collapse;font-size:14px}th,td{padding:7px 6px;text-align:right;border-bottom:1px solid #e3e8f5}th{font-size:11px;color:#6a78a8;text-transform:uppercase;letter-spacing:.6px}td:first-child,th:first-child{text-align:left}td.o{text-align:left;color:#5b6896;font-size:13px}tr.tot td{font-weight:800;border-bottom:0;background:#f3f6fd}'+
+  '.note{color:#4d5a8a;font-size:13.5px;margin:6px 0}.ov{display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid #eef1fa;flex-wrap:wrap}.ov .n{width:62px;font-weight:800;font-size:13px}.ov .bw{color:#5b6896;font-size:13px;min-width:90px}.ov .rn{margin-left:auto;font-weight:800;font-size:13px}'+
+  '.b{display:inline-flex;min-width:28px;height:28px;padding:0 6px;border-radius:14px;align-items:center;justify-content:center;font-weight:800;font-size:12px;background:#eef1fa;border:1px solid #d6dcef;margin-right:4px}.b4{background:#12a3d8;color:#fff;border-color:#12a3d8}.b6{background:#7a5cff;color:#fff;border-color:#7a5cff}.bw2{background:#ff3d5e;color:#fff;border-color:#ff3d5e}.bx{background:#fff3d6;border-color:#f2c14e;color:#7a5a00}'+
+  '.ft{padding:16px 30px 26px;text-align:center;color:#6a78a8;font-size:12.5px;border-top:1px solid #e3e8f5}.ft b{color:#16204a}.pb{margin:0 auto 14px;display:block;border:0;background:#16204a;color:#fff;font:inherit;font-weight:700;border-radius:12px;padding:10px 18px;cursor:pointer}'+
+  '@media(max-width:560px){.hd,.bd{padding-left:16px;padding-right:16px}.sb{grid-template-columns:1fr}h1{font-size:24px}table{font-size:12.5px}.tw{overflow-x:auto}}'+
+  '@media print{body{background:#fff;padding:0}.sheet{box-shadow:none;border-radius:0;max-width:none}.pb{display:none}.hd,.tm,.b4,.b6,.bw2,tr.tot td,.res{-webkit-print-color-adjust:exact;print-color-adjust:exact}h2{break-after:avoid}table,.ov{break-inside:avoid}}'+
+  '</style></head><body><div class="sheet"><div class="hd"><div class="brand"><i class="mk"></i>Cricket Centre</div><h1>'+E(c.title)+'</h1><div class="meta">'+(c.date?E(niceDate(c.date))+' · ':'')+E(c.teams[0].name)+' v '+E(c.teams[1].name)+' · '+c.overs+' over'+(c.overs>1?'s':'')+' a side'+(c.demo?' · Practice match':'')+'</div><div class="res">'+status+'</div><div class="sb">';
+  [0,1].forEach(function(t){
+    var inn=st.innings.filter(function(i){return i.bat===t&&i.balls>0})[0];
+    html+='<div class="tm"><b>'+E(c.teams[t].name)+'</b>'+(inn?'<div class="sc">'+inn.runs+'/'+inn.wkts+'</div><small>'+E(inn.overs)+' / '+c.overs+' overs · RR '+inn.rr.toFixed(2)+'</small>':'<small>Yet to bat</small>')+'</div>';
+  });
+  html+='</div></div><div class="bd"><div class="note" style="margin-top:14px"><b>Rules used:</b> '+E(rules)+'</div>';
+  started.forEach(function(i,k){
+    var by=i.endedBy?({allout:'All out',overs:'Overs complete',target:'Target reached',declared:'Innings closed by scorer'})[i.endedBy]||String(i.endedBy):(i.done?'Innings complete':'Innings in progress');
+    html+='<h2>'+(i.idx===0?'1st':'2nd')+' innings · '+E(i.batName)+'</h2><div class="note">'+E(by)+(i.target?' · Target '+i.target:'')+'</div>';
+    html+='<h3>Batting</h3><div class="tw"><table><tr><th>Batter</th><th></th><th>R</th><th>B</th><th>4s</th><th>6s</th><th>SR</th></tr>';
+    i.batting.forEach(function(b){html+='<tr><td><b>'+E(b.name)+'</b></td><td class="o">'+(b.notOut?'not out':E(b.out))+'</td><td><b>'+b.runs+'</b></td><td>'+b.balls+'</td><td>'+b.fours+'</td><td>'+b.sixes+'</td><td>'+b.sr+'</td></tr>'});
+    var ex=i.extras;html+='<tr><td>Extras</td><td class="o">wd '+ex.wd+', nb '+ex.nb+', b '+ex.b+', lb '+ex.lb+'</td><td><b>'+i.extrasTotal+'</b></td><td colspan="4"></td></tr>';
+    html+='<tr class="tot"><td>Total</td><td class="o">'+E(i.overs)+' overs · RR '+i.rr.toFixed(2)+'</td><td>'+i.runs+'/'+i.wkts+'</td><td colspan="4"></td></tr></table></div>';
+    if(i.yetToBat.length)html+='<div class="note"><b>Yet to bat:</b> '+i.yetToBat.map(function(o){return E(o.name)}).join(', ')+'</div>';
+    html+='<h3>Bowling · '+E(i.bowlName)+'</h3><div class="tw"><table><tr><th>Bowler</th><th>O</th><th>M</th><th>R</th><th>W</th><th>Wd</th><th>Nb</th><th>Econ</th></tr>';
+    i.bowling.forEach(function(b){html+='<tr><td><b>'+E(b.name)+'</b></td><td>'+E(b.overs)+'</td><td>'+b.maidens+'</td><td>'+b.runs+'</td><td><b>'+b.wkts+'</b></td><td>'+b.wd+'</td><td>'+b.nb+'</td><td>'+b.econ+'</td></tr>'});
+    html+='</table></div>';
+    if(i.fow.length)html+='<h3>Fall of wickets</h3><div class="note">'+i.fow.map(function(f){return f.runs+'-'+f.wkts+' ('+E(f.name)+', '+E(f.over)+' ov)'}).join(' · ')+'</div>';
+    var chipH=function(arr){return arr.map(function(t){var cl=/^\d*W$/.test(t)?'bw2':t==='4'?'b4':t==='6'?'b6':/Wd|Nb|B$|Lb$/.test(t)?'bx':'';return '<span class="b '+cl+'">'+E(t==='0'?'·':t)+'</span>'}).join('')};
+    html+='<h3>Over by over</h3>';
+    i.overHistory.forEach(function(o){html+='<div class="ov"><span class="n">Over '+o.n+'</span><span class="bw">'+E(o.bowler)+'</span><span>'+chipH(o.balls)+'</span><span class="rn">'+o.runs+' run'+(o.runs===1?'':'s')+(o.partial?' (innings ended)':'')+'</span></div>'});
+    if(i.thisOver.length)html+='<div class="ov"><span class="n">Over '+i.curOverNo+'</span><span class="bw">'+E(i.bowler!=null?i.players.bowl[i.bowler]:(i.lastBowler!=null?i.players.bowl[i.lastBowler]:''))+'</span><span>'+chipH(i.thisOver)+'</span><span class="rn">'+(i.done?'incomplete over':'in progress')+'</span></div>';
+  });
+  html+='</div><div class="ft"><button class="pb" onclick="window.print()">Print or save as PDF</button>Match report saved '+E(new Date().toLocaleString())+(st.result?'':' (scores may have changed since)')+'<br>Developed by <b>Anthony Dennis</b></div></div></body></html>';
+  return html;
+}
+function downloadReport(){
+  if(!S)return;
+  var name=(S.config.title||'Match').replace(/[^A-Za-z0-9]+/g,'-').replace(/^-|-$/g,'')+(S.config.date?'-'+S.config.date:'')+'.html';
+  var blob=new Blob([buildReport(S)],{type:'text/html'}),a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);a.download=name;document.body.appendChild(a);a.click();setTimeout(function(){URL.revokeObjectURL(a.href);a.remove()},1500);toast('Report downloaded',1);
+}
+document.addEventListener('click',function(e){if(e.target&&e.target.id==='dlrep')downloadReport()});
+
 /* ---------- tournaments (saved on this device) ---------- */
 function tList(){try{return JSON.parse(localStorage.getItem('ct_list')||'[]').filter(function(t){return t&&t.id&&t.key})}catch(e){return[]}}
 function tSave(t){try{var l=tList().filter(function(x){return x.id!==t.id});l.push(t);localStorage.setItem('ct_list',JSON.stringify(l))}catch(e){}}
@@ -325,8 +380,8 @@ function viewerBody(){return tab==='live'?liveTab():tab==='card'?scorecardTab():
 function render(){
   if(!S){app.innerHTML=(err?'<div class="warn" style="margin-top:30px">'+esc(err)+'</div>':'<div class="mut" style="margin-top:40px;text-align:center">Loading match...<br>The free server may take up to a minute to wake up.</div>')+FOOT;return}
   var h=head()+tabsHtml()+viewerBody();
-  if(mode==='s')h+=scorerPanel()+attachCard();
-  else{h+='<div class="card" style="margin-top:6px"><button class="btn sec" id="share">Share this live scoreboard</button></div>'}
+  if(mode==='s')h+=scorerPanel()+attachCard()+'<div class="card"><button class="btn sec" id="dlrep">Download match report</button></div>';
+  else{h+='<div class="card" style="margin-top:6px"><button class="btn sec" id="share">Share this live scoreboard</button><button class="btn sec" id="dlrep" style="margin-top:10px">Download match report</button></div>'}
   h+=FOOT;app.innerHTML=h;tickLabel();wire();
   if(mode==='s')openNeeds();
 }
