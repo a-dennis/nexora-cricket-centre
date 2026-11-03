@@ -28,6 +28,7 @@ function makeStore() {
       async create(m) { await ready; await pool.query('INSERT INTO cricket_matches(id,config,events,key_hash) VALUES($1,$2,$3,$4)', [m.id, JSON.stringify(m.config), '[]', m.keyHash]); },
       async tcreate(t) { await tready; await pool.query('INSERT INTO cricket_tournaments(id,name,key_hash) VALUES($1,$2,$3)', [t.id, t.name, t.keyHash]); },
       async tget(id) { await tready; const r = await pool.query('SELECT * FROM cricket_tournaments WHERE id=$1', [id]); const x = r.rows[0]; return x && { id: x.id, name: x.name, keyHash: x.key_hash }; },
+      async trename(id, name) { await tready; const r = await pool.query('UPDATE cricket_tournaments SET name=$2 WHERE id=$1', [id, name]); return r.rowCount === 1; },
       async tcount() { await tready; const r = await pool.query('SELECT count(*)::int AS n FROM cricket_tournaments'); return r.rows[0].n; },
       async byTournament(tid) { await ready; const r = await pool.query("SELECT * FROM cricket_matches WHERE config->>'tid'=$1 ORDER BY created_at LIMIT 300", [tid]); return r.rows.map(row); },
       async setConfig(id, config) { await ready; await pool.query('UPDATE cricket_matches SET config=$1 WHERE id=$2', [JSON.stringify(config), id]); },
@@ -58,6 +59,7 @@ function makeStore() {
     async create(m) { db[m.id] = { id: m.id, config: m.config, events: [], keyHash: m.keyHash, rev: 0, updated: new Date().toISOString() }; save(); },
     async tcreate(t) { tdb[t.id] = { id: t.id, name: t.name, keyHash: t.keyHash }; tsave(); },
     async tget(id) { const t = tdb[id]; return t ? Object.assign({}, t) : null; },
+    async trename(id, name) { if (!tdb[id]) return false; tdb[id].name = name; tsave(); return true; },
     async tcount() { return Object.keys(tdb).length; },
     async byTournament(tid) { return Object.values(db).filter((m) => m.config && m.config.tid === tid).map((m) => JSON.parse(JSON.stringify(m))); },
     async setConfig(id, config) { if (db[id]) { db[id].config = config; save(); } },
@@ -132,7 +134,7 @@ async function handle(req, res) {
   if (p === '/healthz') return send(res, 200, { ok: true, storage: store.kind });
   if (p === '/api/info') return send(res, 200, { storage: store.kind });
   let mt;
-  if (p === '/api/backup' || p === '/api/restore') {
+  if (p === '/api/backup' || p === '/api/restore' || p === '/api/admin/tournament-name') {
     // Owner-only. Disabled unless BACKUP_TOKEN is set. Backups contain match data and hashed keys, never raw keys.
     const tok = process.env.BACKUP_TOKEN;
     if (!tok || tok.length < 24) return send(res, 404, { error: 'Unknown API' });
@@ -143,6 +145,12 @@ async function handle(req, res) {
       const [ms, ts] = [await store.allMatches(), await store.allTournaments()];
       return send(res, 200, { format: 'cricket-backup', version: 1, exportedAt: new Date().toISOString(), storage: store.kind,
         counts: { matches: ms.length, tournaments: ts.length }, tournaments: ts, matches: ms });
+    }
+    if (p === '/api/admin/tournament-name' && req.method === 'POST') {
+      const body = await readBody(req, 2e3);
+      const nm = body && engine.cleanName(body.name, 40);
+      if (!body || !/^[a-z0-9]{6,12}$/.test(String(body.id || '')) || !nm) return send(res, 400, { error: 'Need tournament id and a name up to 40 characters' });
+      return (await store.trename(body.id, nm)) ? send(res, 200, { ok: true, id: body.id, name: nm }) : send(res, 404, { error: 'Tournament not found' });
     }
     if (p === '/api/restore' && req.method === 'POST') {
       const body = await readBody(req, 5e6);
