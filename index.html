@@ -189,6 +189,24 @@ a{color:#0b6b9a}
 .stale{color:#b87400}
 button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline-color:#7a3cff}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+
+/* desktop / laptop layout */
+@media(min-width:900px){
+.wrap{max-width:1160px;padding:26px 32px 70px}
+.stick{margin:10px -32px 12px;padding:8px 32px 0}
+.stick .tabs{max-width:600px}
+.mini{padding:4px 0 10px}
+.dsk.sc{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(380px,.9fr);gap:28px;align-items:start}
+.dsk.sc .dr{position:sticky;top:132px}
+.dsk.vw .dl{column-count:2;column-gap:28px}
+.dsk.vw .dl>*{break-inside:avoid}
+.dsk h1{break-after:avoid}
+.tcal{display:grid;grid-template-columns:minmax(0,440px) minmax(0,1fr);gap:30px;align-items:start}
+.tcal .tr>h1:first-child{margin-top:0}
+.wrap>.card{max-width:780px}
+.wrap>.hero{max-width:780px}
+.sheet{align-items:center}.sheet>div{border-radius:24px;max-width:560px}
+}
 </style></head><body>
 <div class="wrap" id="app"></div>
 <script>
@@ -366,17 +384,17 @@ function renderT(){
   var by={};T.matches.forEach(function(m){if(m.date)(by[m.date]=by[m.date]||[]).push(m)});
   var p=ym.split('-'),y=+p[0],mo=+p[1]-1,first=new Date(y,mo,1).getDay(),dim=new Date(y,mo+1,0).getDate(),today=todayStr();
   var h='<div class="top"><b class="brand"><i class="mark"></i>Cricket Centre</b><span></span></div><div class="hero"><h2>'+esc(T.name)+'</h2><p>Pick a date to see its match scores.</p></div>';
-  h+='<div class="card"><div class="row" style="margin-bottom:10px"><button class="nav" id="pm" aria-label="Previous month">‹</button><b style="font-size:17px">'+MON[mo]+' '+y+'</b><button class="nav" id="nm" aria-label="Next month">›</button></div><div class="cal">';
+  h+='<div class="tcal"><div class="tl"><div class="card"><div class="row" style="margin-bottom:10px"><button class="nav" id="pm" aria-label="Previous month">‹</button><b style="font-size:17px">'+MON[mo]+' '+y+'</b><button class="nav" id="nm" aria-label="Next month">›</button></div><div class="cal">';
   ['S','M','T','W','T','F','S'].forEach(function(d){h+='<div class="dow">'+d+'</div>'});
   for(var i=0;i<first;i++)h+='<div></div>';
   for(var d=1;d<=dim;d++){var ds=y+'-'+pad2(mo+1)+'-'+pad2(d),n=(by[ds]||[]).length;
     h+='<button class="day'+(n?' has':'')+(ds===selDay?' sel':'')+(ds===today?' today':'')+'" data-d="'+ds+'" aria-label="'+d+' '+MON[mo]+(n?', '+n+' match'+(n>1?'es':''):'')+'">'+d+(n?'<i>'+n+'</i>':'')+'</button>'}
-  h+='</div></div>';
+  h+='</div></div></div><div class="tr">';
   var list=selDay?(by[selDay]||[]):null,own=tList().filter(function(t){return t.id===id})[0];
   if(selDay){h+='<h1>'+niceDate(selDay)+'</h1>'+(list.length?list.map(matchCard).join(''):'<div class="card mut">No matches on this date.</div>')}
   else{var mm2=T.matches.filter(function(m){return m.date&&m.date.slice(0,7)===ym}).sort(function(a,b){return a.date<b.date?1:-1});h+='<h1>'+MON[mo]+' '+y+'</h1>'+(mm2.length?mm2.map(matchCard).join(''):'<div class="card mut">No matches this month.</div>')}
   if(own)h+='<button class="btn pri" id="addm" style="margin-top:6px">Add a match</button><button class="btn sec" id="dltb" style="margin-top:10px">Download tournament backup (file)</button>';
-  h+=FOOT;app.innerHTML=h;
+  h+='</div></div>'+FOOT;app.innerHTML=h;
   document.getElementById('pm').onclick=function(){shiftMonth(-1)};document.getElementById('nm').onclick=function(){shiftMonth(1)};
   Array.prototype.forEach.call(document.querySelectorAll('.day'),function(b){b.onclick=function(){selDay=selDay===b.dataset.d?null:b.dataset.d;renderT()}});
   var a=document.getElementById('addm');if(a)a.onclick=function(){location.href='/?t='+id};
@@ -532,10 +550,10 @@ function viewerBody(){return tab==='live'?liveTab():tab==='card'?scorecardTab():
 
 function render(){
   if(!S){app.innerHTML=(err?'<div class="warn" style="margin-top:30px">'+esc(err)+'</div>':'<div class="mut" style="margin-top:40px;text-align:center">Loading match...<br>The free server may take up to a minute to wake up.</div>')+FOOT;return}
-  var h=head()+tabsHtml()+viewerBody();
+  var h=head()+tabsHtml()+'<div class="dsk '+(mode==='s'?'sc':'vw')+'"><div class="dl">'+viewerBody()+(mode==='s'?'</div><div class="dr">':'');
   if(mode==='s')h+=scorerPanel()+attachCard()+'<div class="card"><button class="btn sec" id="dlrep">Download match report</button><button class="btn sec" id="dlbk" style="margin-top:10px">Download match backup (file)</button><div class="mut" style="font-size:12.5px;margin-top:8px">The report is a printable match card. The backup file holds every ball and can restore this match later. It never contains your scorer link.</div></div>';
   else{h+='<div class="card" style="margin-top:6px"><button class="btn sec" id="share">Share this live scoreboard</button><button class="btn sec" id="dlrep" style="margin-top:10px">Download match report</button></div>'}
-  h+=FOOT;app.innerHTML=h;tickLabel();wire();
+  h+='</div></div>'+FOOT;app.innerHTML=h;tickLabel();wire();
   if(mode==='s')openNeeds();
 }
 function wire(){
