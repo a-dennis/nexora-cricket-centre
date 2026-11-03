@@ -1,0 +1,10 @@
+{
+  "name": "nexora-cricket-centre",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Ball-by-ball scoring and shareable live scoreboard for a friendly tournament.",
+  "main": "server.js",
+  "scripts": { "start": "node server.js", "test": "node test_engine.js" },
+  "engines": { "node": ">=18" },
+  "dependencies": { "pg": "^8.11.3" }
+}
