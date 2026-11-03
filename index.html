@@ -83,25 +83,23 @@ function chipCls(t){if(/^\d*W$/.test(t))return'bw';if(t==='4')return'b4';if(t===
 function chips(arr,pad){var h='';arr.forEach(function(t){h+='<div class="ball '+chipCls(t)+'">'+esc(t==='0'?'·':t)+'</div>'});for(var i=arr.length;i<(pad||0);i++)h+='<div class="ball bn">·</div>';return h}
 
 /* ---------- HOME ---------- */
-var A='Arjun K.\nVikram P.\nSana M.\nDev R.\nMeera J.\nKabir L.', B='Rahul S.\nNikhil T.\nImran A.\nPriya N.\nRavi D.\nTara B.';
 function home(){
-  app.innerHTML='<div class="top"><b>Cricket Centre</b><span class="demo">FREE TRIAL</span></div>'+
-  '<h2>New match</h2><div class="mut">Someone scores every ball. Everyone else follows live from a share link.</div>'+
-  '<div class="card" style="margin-top:14px"><label>Match title</label><input id="title" value="Practice Match" maxlength="50">'+
+  app.innerHTML='<div class="top"><b>Cricket Centre</b><span></span></div>'+
+  '<h2>New match</h2>'+
+  '<div class="card" style="margin-top:14px"><label>Match title</label><input id="title" placeholder="e.g. Match 1" maxlength="50">'+
   '<div class="two"><div><label>Overs per innings (max 10)</label><select id="overs">'+[1,2,3,4,5,6,7,8,9,10].map(function(n){return '<option'+(n===6?' selected':'')+'>'+n+'</option>'}).join('')+'</select></div>'+
   '<div><label>Batting first</label><select id="first"><option value="0">Team 1</option><option value="1">Team 2</option></select></div></div>'+
-  '<div class="two"><div><label>Team 1 name</label><input id="t0" value="Falcons" maxlength="24"></div><div><label>Team 2 name</label><input id="t1" value="Titans" maxlength="24"></div></div>'+
-  '<div class="two"><div><label>Team 1 players (one per line)</label><textarea id="p0">'+esc(A)+'</textarea></div><div><label>Team 2 players (one per line)</label><textarea id="p1">'+esc(B)+'</textarea></div></div>'+
-  '<div class="mut" style="margin-top:6px">Sample names are filled in. Replace them with your own. 2 to 15 players per team.</div>'+
-  '<h1>Rules (you choose)</h1><div class="two"><div><label>Wide penalty runs</label><select id="wd"><option>1</option><option>0</option><option>2</option></select></div><div><label>No-ball penalty runs</label><select id="nb"><option>1</option><option>0</option><option>2</option></select></div></div>'+
+  '<div class="two"><div><label>Team 1 name</label><input id="t0" placeholder="Team 1" maxlength="24"></div><div><label>Team 2 name</label><input id="t1" placeholder="Team 2" maxlength="24"></div></div>'+
+  '<div class="two"><div><label>Team 1 players (one per line)</label><textarea id="p0" placeholder="One name per line"></textarea></div><div><label>Team 2 players (one per line)</label><textarea id="p1" placeholder="One name per line"></textarea></div></div>'+
+  '<div class="mut" style="margin-top:6px">2 to 15 players per team.</div>'+
+  '<h1>Rules</h1><div class="two"><div><label>Wide penalty runs</label><select id="wd"><option>1</option><option>0</option><option>2</option></select></div><div><label>No-ball penalty runs</label><select id="nb"><option>1</option><option>0</option><option>2</option></select></div></div>'+
   '<label>Max overs per bowler</label><select id="mob"><option value="0">No limit</option>'+[1,2,3,4,5].map(function(n){return '<option>'+n+'</option>'}).join('')+'</select>'+
-  '<label><input type="checkbox" id="demo" checked style="width:auto;margin-right:8px">Practice match (shows a SAMPLE badge)</label>'+
-  '<div class="mut">All out = players minus one wickets. Ties are shown as ties (no super over). Rules can be changed later.</div>'+
+    '<div class="mut">All out = players minus one wickets. Ties are shown as ties (no super over).</div>'+
   '<button class="btn pri" id="go" style="margin-top:16px">Create match</button></div>'+FOOT;
   document.getElementById('go').onclick=function(){
     var b=this;b.disabled=true;
     var lines=function(s){return document.getElementById(s).value.split('\n').map(function(x){return x.trim()}).filter(Boolean)};
-    api('POST','/api/matches',{title:v('title'),overs:+v('overs'),batFirst:+v('first'),wideRun:+v('wd'),nbRun:+v('nb'),maxOversPerBowler:+v('mob'),demo:document.getElementById('demo').checked,
+    api('POST','/api/matches',{title:v('title'),overs:+v('overs'),batFirst:+v('first'),wideRun:+v('wd'),nbRun:+v('nb'),maxOversPerBowler:+v('mob'),demo:false,
       teams:[{name:v('t0'),players:lines('p0')},{name:v('t1'),players:lines('p1')}]}).then(function(r){
       b.disabled=false;
       if(!r.ok){toast(r.j.error||'Could not create');return}
@@ -113,7 +111,7 @@ function v(i){return document.getElementById(i).value}
 function showCreated(j){
   var vu=location.origin+j.viewerPath, su=location.origin+j.scorerPath+'#k='+j.scorerKey;
   try{localStorage.setItem('ck_'+j.id,j.scorerKey)}catch(e){}
-  app.innerHTML='<div class="top"><b>Cricket Centre</b><span class="demo">MATCH READY</span></div><h2>Match created</h2>'+
+  app.innerHTML='<div class="top"><b>Cricket Centre</b><span></span></div><h2>Match created</h2>'+
   '<div class="card"><h1 style="margin-top:0">1. Share this with everyone (view only)</h1><div class="link" id="vu">'+esc(vu)+'</div>'+
   '<div class="grid" style="grid-template-columns:1fr 1fr"><button class="btn sec" id="cv">Copy</button><button class="btn sec" id="sv">Share</button></div></div>'+
   '<div class="card"><h1 style="margin-top:0">2. Scorer link (keep private)</h1><div class="link" id="su">'+esc(su)+'</div>'+
@@ -218,13 +216,12 @@ function scorerPanel(){
   if(st.result)return '<div class="card"><div class="mut">Match finished. Use Undo if the last ball was a mistake.</div><div class="grid" style="grid-template-columns:1fr 1fr"><button class="btn small" id="undo">↶ Undo</button><button class="btn small" id="newm">New match</button></div></div>';
   var dis=busy||st.needs.length?' disabled':'';
   var h='<h1>Scorer pad · '+esc(i.batName)+' batting</h1><div class="card" style="padding:12px 14px">';
-  h+='<div class="sub" style="margin-bottom:8px">'+(extra?'Adding: <b class="amber">'+({wd:'Wide',nb:'No ball',b:'Byes',lb:'Leg byes'})[extra]+'</b> · tap runs (0 = none)':'Tap the runs scored off the ball')+'</div>';
+  h+='<div class="sub" style="margin-bottom:8px">'+(extra?'Adding: <b class="amber">'+({wd:'Wide',nb:'No ball',b:'Byes',lb:'Leg byes'})[extra]+'</b> · tap runs (0 = none)':'')+'</div>';
   h+='<div class="grid" style="margin-top:0">';
   [0,1,2,3].forEach(function(n){h+='<button class="btn '+(n?'g1':'g0')+'" data-r="'+n+'"'+dis+'>'+n+'</button>'});
   h+='<button class="btn g4" data-r="4"'+dis+'>4</button><button class="btn g6" data-r="6"'+dis+'>6</button><button class="btn gw span2" id="wk"'+dis+'>WICKET</button>';
   [['wd','Wide'],['nb','No ball'],['b','Bye'],['lb','Leg bye']].forEach(function(e){h+='<button class="btn gx'+(extra===e[0]?' on':'')+'" data-x="'+e[0]+'"'+dis+'>'+e[1]+'</button>'});
   h+='</div><div class="grid" style="grid-template-columns:repeat(4,1fr)"><button class="btn small" data-r="5"'+dis+'>5 runs</button><button class="btn small" data-r="7"'+dis+'>7 runs</button><button class="btn small" id="undo"'+(busy?' disabled':'')+'>↶ Undo</button><button class="btn small" id="swap"'+dis+'>End innings</button></div></div>';
-  h+='<div class="mut" style="text-align:center">Every tap updates the shared link for viewers</div>';
   return h;
 }
 function post(url,body){
