@@ -192,24 +192,26 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 
 /* desktop / laptop layout */
 @media(min-width:900px){
-.wrap{max-width:1160px;padding:26px 32px 70px}
-.stick{margin:10px -32px 12px;padding:8px 32px 0}
-.stick .tabs{max-width:600px}
-.mini{padding:4px 0 10px}
-.dsk.sc{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(380px,.9fr);gap:28px;align-items:start}
-.dsk.sc .dr{position:sticky;top:132px}
-.dsk.vw .dl{column-count:2;column-gap:28px}
-.dsk.vw .dl>*{break-inside:avoid}
-.dsk h1{break-after:avoid}
-.tcal{display:grid;grid-template-columns:minmax(0,440px) minmax(0,1fr);gap:30px;align-items:start}
-.tcal .tr>h1:first-child{margin-top:0}
-.wrap>.card{max-width:780px}
-.wrap>.hero{max-width:780px}
-.sheet{align-items:center}.sheet>div{border-radius:24px;max-width:560px}
+html:not(.pd) .wrap{max-width:1160px;padding:26px 32px 70px}
+html:not(.pd) .stick{margin:10px -32px 12px;padding:8px 32px 0}
+html:not(.pd) .stick .tabs{max-width:600px}
+html:not(.pd) .mini{padding:4px 0 10px}
+html:not(.pd) .dsk.sc{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(380px,.9fr);gap:28px;align-items:start}
+html:not(.pd) .dsk.sc .dr{position:sticky;top:132px}
+html:not(.pd) .dsk.vw .dl{column-count:2;column-gap:28px}
+html:not(.pd) .dsk.vw .dl>*{break-inside:avoid}
+html:not(.pd) .dsk h1{break-after:avoid}
+html:not(.pd) .tcal{display:grid;grid-template-columns:minmax(0,440px) minmax(0,1fr);gap:30px;align-items:start}
+html:not(.pd) .tcal .tr>h1:first-child{margin-top:0}
+html:not(.pd) .wrap>.card{max-width:780px;margin-left:auto;margin-right:auto}
+html:not(.pd) .wrap>.hero{max-width:780px;margin-left:auto;margin-right:auto}
+html:not(.pd) .sheet{align-items:center}html:not(.pd) .sheet>div{border-radius:24px;max-width:560px}
 }
 </style></head><body>
 <div class="wrap" id="app"></div>
 <script>
+(function(){function z(){var sw=screen.width,iw=window.innerWidth,h=document.documentElement,on=!!sw&&iw>sw*1.4;h.classList.toggle('pd',on);h.style.zoom=on?String(iw/sw):''}z();addEventListener('resize',z)})();
+
 (function(){
 'use strict';
 var app=document.getElementById('app');
