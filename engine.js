@@ -39,7 +39,7 @@ function mkInnings(cfg, i) {
     bat, bowl, runs: 0, wkts: 0, balls: 0, extras: { wd: 0, nb: 0, b: 0, lb: 0 },
     batters: cfg.teams[bat].players.map(() => ({ runs: 0, balls: 0, fours: 0, sixes: 0, in: false, out: null })),
     order: [], bowlers: {}, fow: [], overs: [], cur: [], curRuns: 0, curLegal: 0, curTotal: 0,
-    striker: null, non: null, pendingSlot: null, bowler: null, lastBowler: null, done: false, target: null, endedBy: null,
+    striker: null, non: null, pendingSlot: null, bowler: null, lastBowler: null, done: false, target: null, endedBy: null, log: [],
   };
 }
 function swap(inn) {
@@ -137,6 +137,7 @@ function applyBall(cfg, st, ev) {
   const total = bat + extra;
   inn.runs += total; inn.curTotal += total;
   const sp = inn.striker;
+  const logRec = { ov: inn.overs.length, lb: inn.curLegal + (legal ? 1 : 0), bowler: inn.bowler, striker: sp, non: inn.non, r, x, bat, extra, total };
   if (x !== 'wd') inn.batters[sp].balls += 1;
   inn.batters[sp].runs += bat;
   if (bat === 4) inn.batters[sp].fours += 1;
@@ -169,8 +170,11 @@ function applyBall(cfg, st, ev) {
     if (slot === 's') inn.striker = null; else inn.non = null;
     inn.pendingSlot = slot;
     tok = (r ? r : '') + 'W';
+    logRec.w = { k, who: outP, f: f || null, text };
   }
   inn.cur.push(tok);
+  logRec.runs = inn.runs; logRec.wkts = inn.wkts; logRec.tok = tok;
+  inn.log.push(logRec);
   if (legal && inn.curLegal === 6) {
     if (inn.curRuns === 0) bw.maidens += 1;
     inn.overs.push({ bowler: inn.bowler, balls: inn.cur.slice(), runs: inn.curTotal });
@@ -222,6 +226,7 @@ function view(cfg, events) {
       yetToBat: bp.map((n, p) => ({ p, name: n })).filter((o) => !inn.batters[o.p].in),
       bowling: Object.keys(inn.bowlers).map(Number).map((p) => { const b = inn.bowlers[p]; return { p, name: wp[p], overs: oversText(b.balls), maidens: b.maidens, runs: b.runs, wkts: b.wkts, wd: b.wd, nb: b.nb, econ: b.balls ? +(b.runs * 6 / b.balls).toFixed(1) : 0, current: p === inn.bowler }; }),
       fow: inn.fow.map((f) => ({ ...f, name: bp[f.player] })),
+      ballLog: inn.log.map((l) => ({ ov: l.ov, lb: l.lb, bowler: wp[l.bowler], striker: l.striker == null ? null : bp[l.striker], non: l.non == null ? null : bp[l.non], x: l.x, r: l.r, bat: l.bat, extra: l.extra, total: l.total, tok: l.tok, out: l.w ? { k: l.w.k, who: bp[l.w.who], f: l.w.f, text: l.w.text } : null, runs: l.runs, wkts: l.wkts })),
       overHistory: inn.overs.map((o, i) => ({ n: i + 1, bowler: wp[o.bowler], balls: o.balls, runs: o.runs, partial: !!o.partial })),
       thisOver: inn.cur.slice(), curOverNo: inn.overs.length + 1,
       ballsLeft: maxBalls - inn.balls,
