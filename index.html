@@ -336,8 +336,8 @@ function home(){
   '<h1>Rules</h1><div class="two"><div><label>Wide penalty runs</label><select id="wd"><option>1</option><option>0</option><option>2</option></select></div><div><label>No-ball penalty runs</label><select id="nb"><option>1</option><option>0</option><option>2</option></select></div></div>'+
   '<label>Max overs per bowler</label><select id="mob"><option value="0">No limit</option>'+[1,2,3,4,5].map(function(n){return '<option>'+n+'</option>'}).join('')+'</select>'+
     '<div class="mut">All out = players minus one wickets. Ties are shown as ties (no super over).</div>'+
-  '<button class="btn pri" id="go" style="margin-top:16px">Create match</button></div>'+tourCard()+FOOT;
-  wireTour();refreshNames();
+  '<button class="btn pri" id="go" style="margin-top:16px">Create match</button></div>'+tourCard()+appCard()+FOOT;
+  wireTour();refreshNames();wireApp();
   document.getElementById('go').onclick=function(){
     var b=this;b.disabled=true;
     var lines=function(s){return document.getElementById(s).value.split('\n').map(function(x){return x.trim()}).filter(Boolean)};
@@ -356,6 +356,14 @@ function tourCard(){
   l.forEach(function(t){h+='<div class="trow"><b class="fire">'+esc(t.name)+'</b><span><a href="/t/'+esc(t.id)+'">Calendar</a></span></div>'});
   h+='<label>New tournament name</label><input id="tname" maxlength="40" placeholder="Tournament name"><button class="btn sec" id="tgo" style="margin-top:10px">Create tournament calendar</button></div>';
   return h;
+}
+function appCard(){
+  return '<h1>Android app</h1><div class="card"><div class="mut">Get the Android app, or send it to a friend. App and website show the same live scores.</div>'+
+  '<div class="grid" style="grid-template-columns:1fr 1fr;margin-top:10px"><a class="btn pri" href="https://drive.google.com/file/d/1p9KwQbYWqR4KnAYDn8k5Gqe6BrRbBeO7/view" target="_blank" rel="noopener" style="text-decoration:none;text-align:center">Download app</a><button class="btn sec" id="shapp">Share</button></div></div>';
+}
+function wireApp(){
+  var s=document.getElementById('shapp');if(!s)return;
+  s.onclick=function(){var u=location.origin+'/';if(navigator.share)navigator.share({title:'Shahi Premier League - live cricket scores',text:'Live scores and the Android app',url:u}).catch(function(){});else copyTxt(u)};
 }
 function wireTour(){
   var g=document.getElementById('tgo');if(!g)return;
@@ -405,13 +413,16 @@ function renderT(){
   for(var i=0;i<first;i++)h+='<div></div>';
   for(var d=1;d<=dim;d++){var ds=y+'-'+pad2(mo+1)+'-'+pad2(d),n=(by[ds]||[]).length;
     h+='<button class="day'+(n?' has':'')+(ds===selDay?' sel':'')+(ds===today?' today':'')+'" data-d="'+ds+'" aria-label="'+d+' '+MON[mo]+(n?', '+n+' match'+(n>1?'es':''):'')+'">'+d+(n?'<i>'+n+'</i>':'')+'</button>'}
-  h+='</div></div></div><div class="tr">';
+  h+='</div></div></div><div class="tr"><div class="card"><div class="mut">View-only calendar link. Share it with everyone.</div><div class="grid" style="grid-template-columns:1fr 1fr;margin-top:8px"><button class="btn sec" id="ctc">Copy link</button><button class="btn sec" id="cts">Share</button></div></div>';
   var list=selDay?(by[selDay]||[]):null,own=tList().filter(function(t){return t.id===id})[0];
   if(selDay){h+='<h1>'+niceDate(selDay)+'</h1>'+(list.length?list.map(matchCard).join(''):'<div class="card mut">No matches on this date.</div>')}
   else{var mm2=T.matches.filter(function(m){return m.date&&m.date.slice(0,7)===ym}).sort(function(a,b){return a.date<b.date?1:-1});h+='<h1>'+MON[mo]+' '+y+'</h1>'+(mm2.length?mm2.map(matchCard).join(''):'<div class="card mut">No matches this month.</div>')}
   if(own)h+='<button class="btn pri" id="addm" style="margin-top:6px">Add a match</button><button class="btn sec" id="dltb" style="margin-top:10px">Download tournament backup (file)</button>';
   h+='</div></div>'+FOOT;app.innerHTML=h;
   document.getElementById('pm').onclick=function(){shiftMonth(-1)};document.getElementById('nm').onclick=function(){shiftMonth(1)};
+  var cu2=location.origin+'/t/'+id,ctc=document.getElementById('ctc'),cts=document.getElementById('cts');
+  if(ctc)ctc.onclick=function(){copyTxt(cu2)};
+  if(cts)cts.onclick=function(){if(navigator.share)navigator.share({title:T.name,url:cu2}).catch(function(){});else copyTxt(cu2)};
   Array.prototype.forEach.call(document.querySelectorAll('.day'),function(b){b.onclick=function(){selDay=selDay===b.dataset.d?null:b.dataset.d;renderT()}});
   var a=document.getElementById('addm');if(a)a.onclick=function(){location.href='/?t='+id};
 }
