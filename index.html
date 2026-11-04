@@ -304,17 +304,21 @@ function dlBackup(url,hd,nm){
 /* ---------- tournaments (saved on this device) ---------- */
 function tList(){try{return JSON.parse(localStorage.getItem('ct_list')||'[]').filter(function(t){return t&&t.id&&t.key})}catch(e){return[]}}
 function refreshNames(){
-  var raw;try{raw=JSON.parse(localStorage.getItem('ct_list')||'[]')}catch(e){return}
-  if(!Array.isArray(raw))return;
-  raw.forEach(function(t){if(!t||!t.id)return;
-    fetch('/api/tournaments/'+encodeURIComponent(t.id)).then(function(r){return r.ok?r.json():null}).then(function(j){
-      if(!j||!j.name||j.name===t.name)return;
-      try{var cur=JSON.parse(localStorage.getItem('ct_list')||'[]');cur.forEach(function(x){if(x&&x.id===t.id)x.name=j.name});localStorage.setItem('ct_list',JSON.stringify(cur))}catch(e){}
-      Array.prototype.forEach.call(document.querySelectorAll('.trow'),function(r){var l=r.querySelector('a');if(l&&l.getAttribute('href')==='/t/'+t.id){var b=r.querySelector('b');if(b)b.textContent=j.name}});
-      Array.prototype.forEach.call(document.querySelectorAll('#tsel option'),function(o){if(o.value===t.id)o.textContent=j.name});
-    }).catch(function(){})});
+  ['ct_list','ct_view'].forEach(function(store){
+    var raw;try{raw=JSON.parse(localStorage.getItem(store)||'[]')}catch(e){return}
+    if(!Array.isArray(raw))return;
+    raw.forEach(function(t){if(!t||!t.id)return;
+      fetch('/api/tournaments/'+encodeURIComponent(t.id)).then(function(r){return r.ok?r.json():null}).then(function(j){
+        if(!j||!j.name||j.name===t.name)return;
+        try{var cur=JSON.parse(localStorage.getItem(store)||'[]');cur.forEach(function(x){if(x&&x.id===t.id)x.name=j.name});localStorage.setItem(store,JSON.stringify(cur))}catch(e){}
+        Array.prototype.forEach.call(document.querySelectorAll('.trow'),function(r){var l=r.querySelector('a');if(l&&l.getAttribute('href')==='/t/'+t.id){var b=r.querySelector('b');if(b)b.textContent=j.name}});
+        Array.prototype.forEach.call(document.querySelectorAll('#tsel option'),function(o){if(o.value===t.id)o.textContent=j.name});
+      }).catch(function(){})});
+  });
 }
 function tSave(t){try{var l=tList().filter(function(x){return x.id!==t.id});l.push(t);localStorage.setItem('ct_list',JSON.stringify(l))}catch(e){}}
+function vList(){try{return JSON.parse(localStorage.getItem('ct_view')||'[]').filter(function(t){return t&&t.id})}catch(e){return[]}}
+function vSave(t){try{var l=vList().filter(function(x){return x.id!==t.id});l.push({id:t.id,name:t.name});localStorage.setItem('ct_view',JSON.stringify(l))}catch(e){}}
 function pad2(n){return(n<10?'0':'')+n}
 function todayStr(){var d=new Date();return d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate())}
 var MON=['January','February','March','April','May','June','July','August','September','October','November','December'];
@@ -336,8 +340,8 @@ function home(){
   '<h1>Rules</h1><div class="two"><div><label>Wide penalty runs</label><select id="wd"><option>1</option><option>0</option><option>2</option></select></div><div><label>No-ball penalty runs</label><select id="nb"><option>1</option><option>0</option><option>2</option></select></div></div>'+
   '<label>Max overs per bowler</label><select id="mob"><option value="0">No limit</option>'+[1,2,3,4,5].map(function(n){return '<option>'+n+'</option>'}).join('')+'</select>'+
     '<div class="mut">All out = players minus one wickets. Ties are shown as ties (no super over).</div>'+
-  '<button class="btn pri" id="go" style="margin-top:16px">Create match</button></div>'+tourCard()+appCard()+FOOT;
-  wireTour();refreshNames();wireApp();
+  '<button class="btn pri" id="go" style="margin-top:16px">Create match</button></div>'+tourCard()+linkCard()+appCard()+FOOT;
+  wireTour();refreshNames();wireApp();wireLink();
   document.getElementById('go').onclick=function(){
     var b=this;b.disabled=true;
     var lines=function(s){return document.getElementById(s).value.split('\n').map(function(x){return x.trim()}).filter(Boolean)};
@@ -354,8 +358,25 @@ function v(i){return document.getElementById(i).value}
 function tourCard(){
   var l=tList(),h='<h1>Tournament calendar</h1><div class="card"><div class="mut">Group matches by date so anyone with the calendar link can look back at past scores.</div>';
   l.forEach(function(t){h+='<div class="trow"><b class="fire">'+esc(t.name)+'</b><span><a href="/t/'+esc(t.id)+'">Calendar</a></span></div>'});
+  vList().filter(function(x){return !l.some(function(o){return o.id===x.id})}).forEach(function(t){h+='<div class="trow"><b class="fire">'+esc(t.name)+'</b><span><a href="/t/'+esc(t.id)+'">Calendar</a> <small class="mut">view only</small></span></div>'});
   h+='<label>New tournament name</label><input id="tname" maxlength="40" placeholder="Tournament name"><button class="btn sec" id="tgo" style="margin-top:10px">Create tournament calendar</button></div>';
   return h;
+}
+function linkCard(){
+  return '<h1>Open a link</h1><div class="card"><div class="mut">Have a calendar, organiser, scorer or match link for this app? Paste it here to open it on this device.</div>'+
+  '<input id="olink" placeholder="https://nexora-cricket-centre.onrender.com/t/..." style="margin-top:8px">'+
+  '<button class="btn sec" id="ogo" style="margin-top:10px">Open</button></div>';
+}
+function wireLink(){
+  var g=document.getElementById('ogo');if(!g)return;
+  g.onclick=function(){
+    var u=(v('olink')||'').trim();if(!u)return;
+    var m=u.match(/^https?:\/\/([a-z0-9.:-]+)(\/[tm]\/[a-z0-9]{6,12})(#.*)?$/i);
+    if(m){if(m[1]!==location.host){toast('That link is for a different app');return}location.href=m[2]+(m[3]||'');return}
+    var p=u.match(/^(\/[tm]\/[a-z0-9]{6,12})(#.*)?$/i);
+    if(p){location.href=p[1]+(p[2]||'');return}
+    toast('Paste a full match or calendar link from this app');
+  };
 }
 function appCard(){
   return '<h1>Android app</h1><div class="card"><div class="mut">Get the Android app, or send it to a friend. App and website show the same live scores.</div>'+
@@ -393,6 +414,7 @@ function loadT(first){
   fetch('/api/tournaments/'+id).then(function(r){return r.json().then(function(j){return{ok:r.ok,j:j}})}).then(function(r){
     if(!r.ok){err=r.j.error||'Error';if(!T)renderT();return}
     err=null;var sig=JSON.stringify(r.j);if(T&&T._sig===sig)return;T=r.j;T._sig=sig;
+    if(T&&T.name&&!tList().some(function(t){return t.id===id}))vSave({id:id,name:T.name});
     if(!ym){var ds=T.matches.map(function(m){return m.date}).filter(Boolean).sort();var last=ds.length?ds[ds.length-1]:todayStr();ym=last.slice(0,7);if(ds.length&&selDay===null)selDay=last}
     renderT();
   }).catch(function(){if(!T){err='No connection';renderT()}});
@@ -417,7 +439,7 @@ function renderT(){
   var list=selDay?(by[selDay]||[]):null,own=tList().filter(function(t){return t.id===id})[0];
   if(selDay){h+='<h1>'+niceDate(selDay)+'</h1>'+(list.length?list.map(matchCard).join(''):'<div class="card mut">No matches on this date.</div>')}
   else{var mm2=T.matches.filter(function(m){return m.date&&m.date.slice(0,7)===ym}).sort(function(a,b){return a.date<b.date?1:-1});h+='<h1>'+MON[mo]+' '+y+'</h1>'+(mm2.length?mm2.map(matchCard).join(''):'<div class="card mut">No matches this month.</div>')}
-  if(own)h+='<button class="btn pri" id="addm" style="margin-top:6px">Add a match</button><button class="btn sec" id="dltb" style="margin-top:10px">Download tournament backup (file)</button>';
+  if(own)h+='<button class="btn pri" id="addm" style="margin-top:6px">Add a match</button><button class="btn sec" id="dltb" style="margin-top:10px">Download tournament backup (file)</button><button class="btn sec" id="corg" style="margin-top:10px">Copy private organiser link</button><div class="mut" style="font-size:12.5px;margin-top:6px">The organiser link opens owner controls on another device, like the Android app. Keep it private: anyone with it can manage this calendar.</div>';
   h+='</div></div>'+FOOT;app.innerHTML=h;
   document.getElementById('pm').onclick=function(){shiftMonth(-1)};document.getElementById('nm').onclick=function(){shiftMonth(1)};
   var cu2=location.origin+'/t/'+id,ctc=document.getElementById('ctc'),cts=document.getElementById('cts');
@@ -425,6 +447,7 @@ function renderT(){
   if(cts)cts.onclick=function(){if(navigator.share)navigator.share({title:T.name,url:cu2}).catch(function(){});else copyTxt(cu2)};
   Array.prototype.forEach.call(document.querySelectorAll('.day'),function(b){b.onclick=function(){selDay=selDay===b.dataset.d?null:b.dataset.d;renderT()}});
   var a=document.getElementById('addm');if(a)a.onclick=function(){location.href='/?t='+id};
+  var cg=document.getElementById('corg');if(cg&&own)cg.onclick=function(){copyTxt(location.origin+'/t/'+id+'#o='+own.key)};
 }
 function attachCard(){
   var l=tList();if(mode!=='s'||!S||S.inTournament||!l.length)return'';
