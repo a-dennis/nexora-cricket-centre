@@ -23,13 +23,16 @@ function normalizeConfig(c) {
   if (![0, 1, 2].includes(wideRun) || ![0, 1, 2].includes(nbRun)) err('Wide / no-ball penalty must be 0, 1 or 2');
   const maxOversPerBowler = c.maxOversPerBowler ? Number(c.maxOversPerBowler) : 0;
   if (!Number.isInteger(maxOversPerBowler) || maxOversPerBowler < 0 || maxOversPerBowler > 10) err('Bad max overs per bowler');
-  return {
+  const out = {
     title: cleanName(c.title, 50) || 'Match',
     overs, teams,
     batFirst: c.batFirst === 1 || c.batFirst === '1' ? 1 : 0,
     wideRun, nbRun, maxOversPerBowler,
     demo: c.demo !== false,
   };
+  // Optional YouTube video id for the viewer page. Invalid ids are dropped silently so a restore never fails over a link.
+  if (typeof c.videoId === 'string' && /^[A-Za-z0-9_-]{11}$/.test(c.videoId)) out.videoId = c.videoId;
+  return out;
 }
 
 function mkInnings(cfg, i) {
