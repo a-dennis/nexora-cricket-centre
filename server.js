@@ -31,7 +31,7 @@ function makeStore() {
       async trename(id, name) { await tready; const r = await pool.query('UPDATE cricket_tournaments SET name=$2 WHERE id=$1', [id, name]); return r.rowCount === 1; },
       async tcount() { await tready; const r = await pool.query('SELECT count(*)::int AS n FROM cricket_tournaments'); return r.rows[0].n; },
       async byTournament(tid) { await ready; const r = await pool.query("SELECT * FROM cricket_matches WHERE config->>'tid'=$1 ORDER BY created_at LIMIT 300", [tid]); return r.rows.map(row); },
-      async setConfig(id, config) { await ready; await pool.query('UPDATE cricket_matches SET config=$1 WHERE id=$2', [JSON.stringify(config), id]); },
+      async setConfig(id, config, bump) { await ready; await pool.query(bump ? 'UPDATE cricket_matches SET config=$1, rev=rev+1, updated_at=now() WHERE id=$2' : 'UPDATE cricket_matches SET config=$1 WHERE id=$2', [JSON.stringify(config), id]); },
       async allMatches() { await ready; const r = await pool.query('SELECT * FROM cricket_matches ORDER BY created_at'); return r.rows.map((x) => Object.assign(row(x), { created: x.created_at })); },
       async allTournaments() { await tready; const r = await pool.query('SELECT * FROM cricket_tournaments ORDER BY created_at'); return r.rows.map((x) => ({ id: x.id, name: x.name, keyHash: x.key_hash, created: x.created_at })); },
       async importMatch(m) { await ready; const r = await pool.query('INSERT INTO cricket_matches(id,config,events,key_hash,rev,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (id) DO NOTHING', [m.id, JSON.stringify(m.config), JSON.stringify(m.events), m.keyHash, m.rev, m.created || m.updated, m.updated]); return r.rowCount === 1; },
@@ -62,7 +62,7 @@ function makeStore() {
     async trename(id, name) { if (!tdb[id]) return false; tdb[id].name = name; tsave(); return true; },
     async tcount() { return Object.keys(tdb).length; },
     async byTournament(tid) { return Object.values(db).filter((m) => m.config && m.config.tid === tid).map((m) => JSON.parse(JSON.stringify(m))); },
-    async setConfig(id, config) { if (db[id]) { db[id].config = config; save(); } },
+    async setConfig(id, config, bump) { if (db[id]) { db[id].config = config; if (bump) { db[id].rev = (db[id].rev || 0) + 1; db[id].updated = new Date().toISOString(); } save(); } },
     async allMatches() { return Object.values(db).map((m) => JSON.parse(JSON.stringify(m))); },
     async allTournaments() { return Object.values(tdb).map((t) => Object.assign({}, t)); },
     async importMatch(m) { if (db[m.id]) return false; db[m.id] = { id: m.id, config: m.config, events: m.events, keyHash: m.keyHash, rev: m.rev, updated: m.updated }; save(); return true; },
@@ -105,6 +105,14 @@ function cleanDate(d) {
     if (!isNaN(t) && t.toISOString().slice(0, 10) === d && d >= '2020-01-01' && d <= '2100-12-31') return d;
   }
   return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+}
+// Extracts a YouTube video id from the common link shapes, or accepts a bare id. Returns '' for empty input, null when unrecognised.
+function ytId(u) {
+  const s = String(u == null ? '' : u).trim();
+  if (!s) return '';
+  if (/^[A-Za-z0-9_-]{11}$/.test(s)) return s;
+  const m = s.match(/(?:youtube\.com\/(?:watch\?[^#]*v=|live\/|embed\/|shorts\/)|youtu\.be\/)([A-Za-z0-9_-]{11})/);
+  return m ? m[1] : null;
 }
 function summary(m) {
   const st = engine.view(m.config, m.events);
@@ -219,6 +227,19 @@ async function handle(req, res) {
     const config = Object.assign({}, m.config, { tid: t.id, date: cleanDate(body.date || m.config.date) });
     await store.setConfig(m.id, config);
     return send(res, 200, { ok: true });
+  }
+  if ((mt = p.match(/^\/api\/matches\/([a-z0-9]{6,12})\/video$/)) && req.method === 'POST') {
+    const m = await store.get(mt[1]);
+    if (!m) return send(res, 404, { error: 'Match not found' });
+    if (!keyEq(req.headers['x-scorer-key'], m.keyHash)) return send(res, 403, { error: 'Use this match\'s scorer link to set the live video.' });
+    const body = await readBody(req);
+    const vid = ytId(body.video);
+    if (vid === null) return send(res, 400, { error: 'That does not look like a YouTube video link.' });
+    const config = Object.assign({}, m.config);
+    if (vid) config.videoId = vid; else delete config.videoId;
+    await store.setConfig(m.id, config, true);
+    const m2 = await store.get(m.id);
+    return send(res, 200, { ok: true, videoId: vid || null, rev: m2 ? m2.rev : undefined });
   }
   if (req.method === 'POST' && p === '/api/matches') {
     const ip = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
