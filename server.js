@@ -121,12 +121,21 @@ function ytId(u) {
 // Team registration: same limits as match teams, so an approved team always fits a match.
 function cleanTeamReg(body) {
   const name = engine.cleanName(body && body.name, 24);
-  const players = Array.isArray(body && body.players) ? body.players.map((p) => engine.cleanName(p, 24)).filter(Boolean) : [];
-  const dedup = []; players.forEach((p) => { if (dedup.indexOf(p) === -1) dedup.push(p); });
+  const raw = Array.isArray(body && body.players) ? body.players : [];
+  const players = [];
+  for (const p of raw) {
+    const pn = engine.cleanName(p && p.name, 24);
+    const pe = engine.cleanName(p && p.empId, 24);
+    if (!pn && !pe) continue;
+    if (!pn) return { error: 'Every player row needs a name' };
+    if (!pe) return { error: 'Every player needs an employee ID' };
+    if (players.some((x) => x.name.toLowerCase() === pn.toLowerCase())) continue;
+    players.push({ name: pn, empId: pe });
+  }
   if (!name) return { error: 'Enter a team name' };
-  if (dedup.length < 2) return { error: 'Add at least 2 players, one per line' };
-  if (dedup.length > 15) return { error: 'A team can have at most 15 players' };
-  return { name, players: dedup };
+  if (players.length < MIN_TEAM_PLAYERS) return { error: 'Add at least ' + MIN_TEAM_PLAYERS + ' players with their employee IDs' };
+  if (players.length > 15) return { error: 'A team can have at most 15 players' };
+  return { name, players };
 }
 // Restore/read validation for stored tournament teams; drops anything malformed.
 function cleanStoredTeams(list) {
@@ -135,7 +144,11 @@ function cleanStoredTeams(list) {
   for (const t of list) {
     if (!t || typeof t.id !== 'string' || !/^[a-z0-9]{6,12}$/.test(t.id)) continue;
     const name = engine.cleanName(t.name, 24);
-    const players = Array.isArray(t.players) ? t.players.map((p) => engine.cleanName(p, 24)).filter(Boolean).slice(0, 15) : [];
+    const players = Array.isArray(t.players) ? t.players.map((p) => {
+      if (typeof p === 'string') { const sn = engine.cleanName(p, 24); return sn ? { name: sn, empId: '' } : null; }
+      const pn = engine.cleanName(p && p.name, 24);
+      return pn ? { name: pn, empId: engine.cleanName(p && p.empId, 24) } : null;
+    }).filter(Boolean).slice(0, 15) : [];
     if (!name || players.length < 2) continue;
     out.push({ id: t.id, name, players, status: t.status === 'approved' ? 'approved' : 'pending', submittedAt: typeof t.submittedAt === 'string' ? t.submittedAt.slice(0, 40) : new Date().toISOString() });
     if (out.length >= MAX_TEAMS_PER_TOURNAMENT) break;
@@ -152,6 +165,7 @@ const bad = new Map();
 function badAuth(ip) { const now = Date.now(); return (bad.get(ip) || []).filter((t) => now - t < 3600e3).length >= 10; }
 function noteBad(ip) { const now = Date.now(); const a = (bad.get(ip) || []).filter((t) => now - t < 3600e3); a.push(now); bad.set(ip, a); }
 const MAX_TOURNAMENTS = 100, MAX_PER_TOURNAMENT = 200, MAX_TEAMS_PER_TOURNAMENT = 40;
+const MIN_TEAM_PLAYERS = 2; // minimum players per registered team (organiser policy; raise to 15 if every slot is mandatory)
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.json': 'application/json', '.webmanifest': 'application/manifest+json' };
 const STATIC_OK = new Set(['index.html']);
 function serveStatic(res, rel) {
@@ -243,7 +257,7 @@ async function handle(req, res) {
     const ms = await store.byTournament(t.id);
     const teams = cleanStoredTeams(t.teams);
     const resp = { id: t.id, name: t.name, matches: ms.map(summary),
-      teams: teams.filter((x) => x.status === 'approved').map((x) => ({ id: x.id, name: x.name, players: x.players })) };
+      teams: teams.filter((x) => x.status === 'approved').map((x) => ({ id: x.id, name: x.name, players: x.players.map((p) => p.name) })) };
     const orgKey = req.headers['x-org-key'];
     if (orgKey) {
       const ip = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
@@ -251,6 +265,7 @@ async function handle(req, res) {
       if (!keyEq(orgKey, t.keyHash)) { noteBad(ip); return send(res, 403, { error: 'Not allowed' }); }
       resp.registration = t.regKeyHash ? 'open' : 'closed';
       resp.pendingTeams = teams.filter((x) => x.status === 'pending').map((x) => ({ id: x.id, name: x.name, players: x.players }));
+      resp.approvedTeams = teams.filter((x) => x.status === 'approved').map((x) => ({ id: x.id, name: x.name, players: x.players }));
     }
     return send(res, 200, resp);
   }
