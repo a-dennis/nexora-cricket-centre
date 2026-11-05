@@ -224,15 +224,15 @@ html:not(.pd) .sheet{align-items:center}html:not(.pd) .sheet>div{border-radius:2
 'use strict';
 var app=document.getElementById('app');
 var path=location.pathname;
-var mm=path.match(/^\/(m|s|t)\/([a-z0-9]+)/);
+var mm=path.match(/^\/(m|s|t|r)\/([a-z0-9]+)/);
 var mode=mm?mm[1]:'home', id=mm?mm[2]:null;
 var S=null, T=null, ym=null, selDay=null, key=null, tab='live', busy=false, extra='', sheet=null, lastOk=0, err=null, polling=null, info={storage:'?'};
 function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
 function ini(n){var w=String(n).trim().split(/\s+/);return (w.length>1?w[0][0]+w[1][0]:String(n).slice(0,2)).toUpperCase()}
 function toast(m,ok){var t=document.createElement('div');t.className='toast'+(ok?' ok':'');t.textContent=m;document.body.appendChild(t);setTimeout(function(){t.remove()},2600)}
 var FOOT='<div class="foot">Developed by <b>Anthony Dennis</b></div>';
-function api(method,url,body,orgKey){
-  return fetch(url,{method:method,headers:Object.assign({'content-type':'application/json'},key?{'x-scorer-key':key}:{},orgKey?{'x-org-key':orgKey}:{}),body:body?JSON.stringify(body):undefined}).then(function(r){return r.json().then(function(j){return {ok:r.ok,status:r.status,j:j}})});
+function api(method,url,body,orgKey,hdrs){
+  return fetch(url,{method:method,headers:Object.assign({'content-type':'application/json'},key?{'x-scorer-key':key}:{},orgKey?{'x-org-key':orgKey}:{},hdrs||{}),body:body?JSON.stringify(body):undefined}).then(function(r){return r.json().then(function(j){return {ok:r.ok,status:r.status,j:j}})});
 }
 function chipCls(t){if(/^\d*W$/.test(t))return'bw';if(t==='4')return'b4';if(t==='6')return'b6';if(/Wd|Nb|B$|Lb$/.test(t))return'bx';if(t==='0')return'b0';return''}
 function chips(arr,pad){var h='';arr.forEach(function(t){h+='<div class="ball '+chipCls(t)+'">'+esc(t==='0'?'·':t)+'</div>'});for(var i=arr.length;i<(pad||0);i++)h+='<div class="ball bn">·</div>';return h}
@@ -322,6 +322,8 @@ function refreshNames(){
   });
 }
 function tSave(t){try{var l=tList().filter(function(x){return x.id!==t.id});l.push(t);localStorage.setItem('ct_list',JSON.stringify(l))}catch(e){}}
+function tSetReg(id,rk){try{var l=tList();l.forEach(function(t){if(t.id===id)t.regKey=rk});localStorage.setItem('ct_list',JSON.stringify(l))}catch(e){}}
+function randKey(n){var c='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789',a=new Uint8Array(n);crypto.getRandomValues(a);var s='';for(var i=0;i<n;i++)s+=c[a[i]%c.length];return s}
 function vList(){try{return JSON.parse(localStorage.getItem('ct_view')||'[]').filter(function(t){return t&&t.id})}catch(e){return[]}}
 function vSave(t){try{var l=vList().filter(function(x){return x.id!==t.id});l.push({id:t.id,name:t.name});localStorage.setItem('ct_view',JSON.stringify(l))}catch(e){}}
 function pad2(n){return(n<10?'0':'')+n}
@@ -339,6 +341,7 @@ function home(){
   '<div class="two"><div><label>Match date</label><input id="date" type="date" value="'+todayStr()+'"></div><div><label>Tournament</label><select id="tsel"><option value="">None</option>'+tList().map(function(t){return '<option value="'+esc(t.id)+'"'+(qt===t.id?' selected':'')+'>'+esc(t.name)+'</option>'}).join('')+'</select></div></div>'+
   '<div class="two"><div><label>Overs per innings (max 10)</label><select id="overs">'+[1,2,3,4,5,6,7,8,9,10].map(function(n){return '<option'+(n===6?' selected':'')+'>'+n+'</option>'}).join('')+'</select></div>'+
   '<div><label>Batting first</label><select id="first"><option value="0">Team 1</option><option value="1">Team 2</option></select></div></div>'+
+  '<div class="two"><div><label>Team 1: pick a registered team</label><select id="pick0"><option value="">Type names below instead</option></select></div><div><label>Team 2: pick a registered team</label><select id="pick1"><option value="">Type names below instead</option></select></div></div>'+
   '<div class="two"><div><label>Team 1 name</label><input id="t0" placeholder="Team 1" maxlength="24"></div><div><label>Team 2 name</label><input id="t1" placeholder="Team 2" maxlength="24"></div></div>'+
   '<div class="two"><div><label>Team 1 players (one per line)</label><textarea id="p0" placeholder="One name per line"></textarea></div><div><label>Team 2 players (one per line)</label><textarea id="p1" placeholder="One name per line"></textarea></div></div>'+
   '<div class="mut" style="margin-top:6px">2 to 15 players per team.</div>'+
@@ -346,7 +349,7 @@ function home(){
   '<label>Max overs per bowler</label><select id="mob"><option value="0">No limit</option>'+[1,2,3,4,5].map(function(n){return '<option>'+n+'</option>'}).join('')+'</select>'+
     '<div class="mut">All out = players minus one wickets. Ties are shown as ties (no super over).</div>'+
   '<button class="btn pri" id="go" style="margin-top:16px">Create match</button></div>'+tourCard()+linkCard()+appCard()+FOOT;
-  wireTour();refreshNames();wireApp();wireLink();
+  wireTour();refreshNames();wireApp();wireLink();wirePick();
   document.getElementById('go').onclick=function(){
     var b=this;b.disabled=true;
     var lines=function(s){return document.getElementById(s).value.split('\n').map(function(x){return x.trim()}).filter(Boolean)};
@@ -376,9 +379,9 @@ function wireLink(){
   var g=document.getElementById('ogo');if(!g)return;
   g.onclick=function(){
     var u=(v('olink')||'').trim();if(!u)return;
-    var m=u.match(/^https?:\/\/([a-z0-9.:-]+)(\/[tm]\/[a-z0-9]{6,12})(#.*)?$/i);
+    var m=u.match(/^https?:\/\/([a-z0-9.:-]+)(\/[tmr]\/[a-z0-9]{6,12})(#.*)?$/i);
     if(m){if(m[1]!==location.host){toast('That link is for a different app');return}location.href=m[2]+(m[3]||'');return}
-    var p=u.match(/^(\/[tm]\/[a-z0-9]{6,12})(#.*)?$/i);
+    var p=u.match(/^(\/[tmr]\/[a-z0-9]{6,12})(#.*)?$/i);
     if(p){location.href=p[1]+(p[2]||'');return}
     toast('Paste a full match or calendar link from this app');
   };
@@ -416,7 +419,8 @@ function showTour(j){
 /* ---------- TOURNAMENT CALENDAR ---------- */
 function loadT(first){
   if(document.hidden&&!first)return;
-  fetch('/api/tournaments/'+id).then(function(r){return r.json().then(function(j){return{ok:r.ok,j:j}})}).then(function(r){
+  var ownK=tList().filter(function(t){return t.id===id})[0];
+  fetch('/api/tournaments/'+id,{headers:ownK?{'x-org-key':ownK.key}:{}}).then(function(r){return r.json().then(function(j){return{ok:r.ok,j:j}})}).then(function(r){
     if(!r.ok){err=r.j.error||'Error';if(!T)renderT();return}
     err=null;var sig=JSON.stringify(r.j);if(T&&T._sig===sig)return;T=r.j;T._sig=sig;
     if(T&&T.name&&!tList().some(function(t){return t.id===id}))vSave({id:id,name:T.name});
@@ -444,6 +448,17 @@ function renderT(){
   var list=selDay?(by[selDay]||[]):null,own=tList().filter(function(t){return t.id===id})[0];
   if(selDay){h+='<h1>'+niceDate(selDay)+'</h1>'+(list.length?list.map(matchCard).join(''):'<div class="card mut">No matches on this date.</div>')}
   else{var mm2=T.matches.filter(function(m){return m.date&&m.date.slice(0,7)===ym}).sort(function(a,b){return a.date<b.date?1:-1});h+='<h1>'+MON[mo]+' '+y+'</h1>'+(mm2.length?mm2.map(matchCard).join(''):'<div class="card mut">No matches this month.</div>')}
+  if(T.teams&&T.teams.length){h+='<h1>Teams</h1>'+T.teams.map(function(tm){return '<div class="card"><b>'+esc(tm.name)+'</b><div class="mut" style="margin-top:4px">'+tm.players.map(esc).join(', ')+'</div></div>'}).join('')}
+  if(own){
+    h+='<h1>Team registrations</h1><div class="card"><div class="mut">Share one link with all team captains. Each captain enters their team name and players. You approve a team before it shows in the app.</div>';
+    if(T.registration==='open'&&own.regKey)h+='<div class="link" style="margin-top:8px">'+esc(location.origin+'/r/'+id+'#r='+own.regKey)+'</div><button class="btn sec" id="creg" style="margin-top:8px">Copy registration link</button>';
+    if(T.registration==='open'&&!own.regKey)h+='<div class="mut" style="margin-top:8px">Registration is open. The link is on the device that created it, or make a new one here.</div>';
+    h+='<button class="btn sec" id="nreg" style="margin-top:10px">'+(T.registration==='open'?'Create new link (disables the old one)':'Create registration link')+'</button>';
+    var pend=T.pendingTeams||[];
+    h+='<h1>Waiting for approval ('+pend.length+')</h1>';
+    h+=pend.length?pend.map(function(tm){return '<div class="trow"><b class="fire">'+esc(tm.name)+'</b><span><button class="btn pri" data-tap="'+esc(tm.id)+'">Approve</button></span><span> </span><button class="btn sec" data-trm="'+esc(tm.id)+'">Remove</button></div><div class="mut" style="margin:2px 0 10px">'+tm.players.map(esc).join(', ')+'</div>'}).join(''):'<div class="mut">No teams waiting.</div>';
+    h+='</div>';
+  }
   if(own)h+='<button class="btn pri" id="addm" style="margin-top:6px">Add a match</button><button class="btn sec" id="dltb" style="margin-top:10px">Download tournament backup (file)</button><button class="btn sec" id="corg" style="margin-top:10px">Copy private organiser link</button><div class="mut" style="font-size:12.5px;margin-top:6px">The organiser link opens owner controls on another device, like the Android app. Keep it private: anyone with it can manage this calendar.</div>';
   h+='</div></div>'+FOOT;app.innerHTML=h;
   document.getElementById('pm').onclick=function(){shiftMonth(-1)};document.getElementById('nm').onclick=function(){shiftMonth(1)};
@@ -452,6 +467,13 @@ function renderT(){
   if(cts)cts.onclick=function(){if(navigator.share)navigator.share({title:T.name,url:cu2}).catch(function(){});else copyTxt(cu2)};
   Array.prototype.forEach.call(document.querySelectorAll('.day'),function(b){b.onclick=function(){selDay=selDay===b.dataset.d?null:b.dataset.d;renderT()}});
   var a=document.getElementById('addm');if(a)a.onclick=function(){location.href='/?t='+id};
+  var nr=document.getElementById('nreg');if(nr&&own)nr.onclick=function(){nr.disabled=true;var rk=randKey(14);
+    api('POST','/api/tournaments/'+id+'/reglink',{regKey:rk},own.key).then(function(r){nr.disabled=false;
+      if(!r.ok){toast(r.j.error||'Could not create link');return}
+      tSetReg(id,rk);loadT(true);toast('Registration link ready - copy and share it',1)}).catch(function(){nr.disabled=false;toast('No connection. Try again.')})};
+  var cr=document.getElementById('creg');if(cr&&own&&own.regKey)cr.onclick=function(){copyTxt(location.origin+'/r/'+id+'#r='+own.regKey)};
+  Array.prototype.forEach.call(document.querySelectorAll('[data-tap]'),function(b){b.onclick=function(){b.disabled=true;api('POST','/api/tournaments/'+id+'/teams/'+b.dataset.tap,{action:'approve'},own.key).then(function(r){b.disabled=false;if(!r.ok){toast(r.j.error||'Could not approve');return}toast('Team approved',1);loadT(true)}).catch(function(){b.disabled=false;toast('No connection. Try again.')})}});
+  Array.prototype.forEach.call(document.querySelectorAll('[data-trm]'),function(b){b.onclick=function(){if(!confirm('Remove this team?'))return;api('POST','/api/tournaments/'+id+'/teams/'+b.dataset.trm,{action:'remove'},own.key).then(function(r){if(!r.ok){toast(r.j.error||'Could not remove');return}toast('Team removed',1);loadT(true)}).catch(function(){toast('No connection. Try again.')})}});
   var cg=document.getElementById('corg');if(cg&&own)cg.onclick=function(){copyTxt(location.origin+'/t/'+id+'#o='+own.key)};
 }
 function videoCard(){
@@ -723,6 +745,50 @@ function openWicket(){
   };
 }
 
+function wirePick(){
+  var sel=document.getElementById('tsel');if(!sel)return;
+  sel.onchange=function(){
+    var t=tList().filter(function(x){return x.id===sel.value})[0];
+    var base='<option value="">Type names below instead</option>';
+    if(!t){var p0=document.getElementById('pick0'),p1=document.getElementById('pick1');if(p0)p0.innerHTML=base;if(p1)p1.innerHTML=base;return}
+    fetch('/api/tournaments/'+t.id).then(function(r){return r.ok?r.json():null}).then(function(j){
+      var teams=(j&&j.teams)||[];
+      [0,1].forEach(function(i){
+        var pk=document.getElementById('pick'+i);if(!pk)return;
+        pk.innerHTML=base+teams.map(function(tm,ix){return '<option value="'+ix+'">'+esc(tm.name)+'</option>'}).join('');
+        pk.onchange=function(){if(pk.value==='')return;var tm=teams[+pk.value];if(!tm)return;document.getElementById('t'+i).value=tm.name;document.getElementById('p'+i).value=tm.players.join('\n');toast(tm.name+' filled in',1)};
+      });
+    }).catch(function(){});
+  };
+  if(sel.value)sel.onchange();
+}
+
+/* ---------- TEAM REGISTRATION (captain page) ---------- */
+function regPage(){
+  var top='<div class="top"><b class="brand"><i class="mark"></i>KCL (KPD Cricket League)</b><span></span></div>';
+  var rk=null,m=location.hash.match(/r=([A-Za-z0-9]+)/);
+  try{if(m){localStorage.setItem('rk_'+id,m[1]);history.replaceState(null,'',location.pathname)}rk=localStorage.getItem('rk_'+id)}catch(e){rk=m?m[1]:null}
+  fetch('/api/tournaments/'+id).then(function(r){return r.json().then(function(j){return{ok:r.ok,j:j}})}).then(function(r){
+    if(!r.ok){app.innerHTML=top+'<div class="warn" style="margin-top:30px">Tournament not found.</div>'+FOOT;return}
+    var name=r.j.name;
+    app.innerHTML=top+'<div class="hero wide"><h2 class="fire">'+esc(name)+'</h2><p>Team registration</p></div>'+
+    '<div class="card"><div class="mut">Enter your team details. The organiser reviews every team before it shows in the app.</div>'+
+    (rk?'':'<div class="warn" style="margin-top:8px">This link looks incomplete. Ask the organiser to share the full registration link again.</div>')+
+    '<label>Team name</label><input id="rname" maxlength="24" placeholder="Your team name">'+
+    '<label>Players (one per line, 2 to 15)</label><textarea id="rplayers" placeholder="One name per line"></textarea>'+
+    '<button class="btn pri" id="rgo" style="margin-top:14px">Submit team</button></div>'+FOOT;
+    document.getElementById('rgo').onclick=function(){
+      var b=this;b.disabled=true;
+      var players=document.getElementById('rplayers').value.split('\n').map(function(x){return x.trim()}).filter(Boolean);
+      api('POST','/api/tournaments/'+id+'/teams',{name:v('rname'),players:players},null,rk?{'x-reg-key':rk}:{}).then(function(rr){
+        b.disabled=false;
+        if(!rr.ok){toast(rr.j.error||'Could not submit');return}
+        app.innerHTML=top+'<div class="hero wide"><h2 class="fire">'+esc(name)+'</h2><p>Team registration</p></div><div class="card"><b>Team submitted.</b><div class="mut" style="margin-top:6px">The organiser will review it before it shows in the app. You can close this page.</div></div>'+FOOT;
+      }).catch(function(){b.disabled=false;toast('No connection. Try again.')});
+    };
+  }).catch(function(){app.innerHTML=top+'<div class="warn" style="margin-top:30px">No connection. Try again.</div>'+FOOT});
+}
+
 /* ---------- boot ---------- */
 if(mode==='home')home();
 else if(mode==='t'){
@@ -731,6 +797,7 @@ else if(mode==='t'){
   renderT();loadT(true);setInterval(loadT,15000);
   document.addEventListener('visibilitychange',function(){if(!document.hidden)loadT()});
 }
+else if(mode==='r'){regPage()}
 else{
   if(mode==='s'){
     var m=location.hash.match(/k=([A-Za-z0-9]+)/);
