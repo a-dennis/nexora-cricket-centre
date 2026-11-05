@@ -177,6 +177,11 @@ label{color:#6d6791}
 .warn{background:#fff0cf;border-color:#e6b45a;color:#7a4b00}
 .toast{background:#d6284f;color:#fff}.toast.ok{background:#0b8f6a;color:#fff}
 .trow{border-bottom-color:#f0dca0}
+.preg{padding:12px 0;border-bottom:1px solid #f0dca0}
+.preg:last-child{border-bottom:0}
+.preg b{font-size:17px;display:block}
+.pregrow{display:flex;gap:8px;margin-top:8px}
+.pregrow .btn{flex:1}
 .dow{color:#8a6a1f}.day{background:#fff3d1;color:#3a2b00}.day.has{background:linear-gradient(135deg,#d9f7ec,#fff0c2);box-shadow:inset 0 0 0 1px #0b8f6a88;color:#1b1740}
 .day.today{box-shadow:inset 0 0 0 2px #7a3cff}.day.sel{background:linear-gradient(135deg,#ffc933,#ff7a45);color:#2b1500;box-shadow:0 4px 12px #ff7a4566}
 .day i{background:#0b8f6a;color:#fff}.day.sel i{background:#3b1c6e;color:#fff}
@@ -456,7 +461,7 @@ function renderT(){
     h+='<button class="btn sec" id="nreg" style="margin-top:10px">'+(T.registration==='open'?'Create new link (disables the old one)':'Create registration link')+'</button>';
     var pend=T.pendingTeams||[];
     h+='<h1>Waiting for approval ('+pend.length+')</h1>';
-    h+=pend.length?pend.map(function(tm){return '<div class="trow"><b class="fire">'+esc(tm.name)+'</b><span><button class="btn pri" data-tap="'+esc(tm.id)+'">Approve</button></span><span> </span><button class="btn sec" data-trm="'+esc(tm.id)+'">Remove</button></div><div class="mut" style="margin:2px 0 10px">'+tm.players.map(esc).join(', ')+'</div>'}).join(''):'<div class="mut">No teams waiting.</div>';
+    h+=pend.length?pend.map(function(tm){return '<div class="preg"><b class="fire">'+esc(tm.name)+'</b><div class="mut" style="margin-top:2px">'+tm.players.map(esc).join(', ')+'</div><div class="pregrow"><button class="btn pri" data-tap="'+esc(tm.id)+'">Approve</button><button class="btn sec" data-trm="'+esc(tm.id)+'">Remove</button></div></div>'}).join(''):'<div class="mut">No teams waiting.</div>';
     h+='</div>';
   }
   if(own)h+='<button class="btn pri" id="addm" style="margin-top:6px">Add a match</button><button class="btn sec" id="dltb" style="margin-top:10px">Download tournament backup (file)</button><button class="btn sec" id="corg" style="margin-top:10px">Copy private organiser link</button><div class="mut" style="font-size:12.5px;margin-top:6px">The organiser link opens owner controls on another device, like the Android app. Keep it private: anyone with it can manage this calendar.</div>';
