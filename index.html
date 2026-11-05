@@ -182,6 +182,9 @@ label{color:#6d6791}
 .preg b{font-size:17px;display:block}
 .pregrow{display:flex;gap:8px;margin-top:8px}
 .pregrow .btn{flex:1}
+.prow{display:flex;gap:8px;margin-bottom:8px}
+.prow .rpname{flex:3}
+.prow .rpemp{flex:2}
 .dow{color:#8a6a1f}.day{background:#fff3d1;color:#3a2b00}.day.has{background:linear-gradient(135deg,#d9f7ec,#fff0c2);box-shadow:inset 0 0 0 1px #0b8f6a88;color:#1b1740}
 .day.today{box-shadow:inset 0 0 0 2px #7a3cff}.day.sel{background:linear-gradient(135deg,#ffc933,#ff7a45);color:#2b1500;box-shadow:0 4px 12px #ff7a4566}
 .day i{background:#0b8f6a;color:#fff}.day.sel i{background:#3b1c6e;color:#fff}
@@ -461,7 +464,9 @@ function renderT(){
     h+='<button class="btn sec" id="nreg" style="margin-top:10px">'+(T.registration==='open'?'Create new link (disables the old one)':'Create registration link')+'</button>';
     var pend=T.pendingTeams||[];
     h+='<h1>Waiting for approval ('+pend.length+')</h1>';
-    h+=pend.length?pend.map(function(tm){return '<div class="preg"><b class="fire">'+esc(tm.name)+'</b><div class="mut" style="margin-top:2px">'+tm.players.map(esc).join(', ')+'</div><div class="pregrow"><button class="btn pri" data-tap="'+esc(tm.id)+'">Approve</button><button class="btn sec" data-trm="'+esc(tm.id)+'">Remove</button></div></div>'}).join(''):'<div class="mut">No teams waiting.</div>';
+    h+=pend.length?pend.map(function(tm){return '<div class="preg"><b class="fire">'+esc(tm.name)+'</b><div class="mut" style="margin-top:2px">'+tm.players.map(function(p){return esc(p.name)+(p.empId?' (ID: '+esc(p.empId)+')':'')}).join(', ')+'</div><div class="pregrow"><button class="btn pri" data-tap="'+esc(tm.id)+'">Approve</button><button class="btn sec" data-trm="'+esc(tm.id)+'">Remove</button></div></div>'}).join(''):'<div class="mut">No teams waiting.</div>';
+    var tapp=T.approvedTeams||[];
+    if(tapp.length){h+='<h1>Approved teams &amp; player IDs (only you see this)</h1>'+tapp.map(function(tm){return '<div class="preg"><b class="fire">'+esc(tm.name)+'</b><div class="mut" style="margin-top:2px">'+tm.players.map(function(p){return esc(p.name)+(p.empId?' (ID: '+esc(p.empId)+')':'')}).join(', ')+'</div></div>'}).join('')}
     h+='</div>';
   }
   if(own)h+='<button class="btn pri" id="addm" style="margin-top:6px">Add a match</button><button class="btn sec" id="dltb" style="margin-top:10px">Download tournament backup (file)</button><button class="btn sec" id="corg" style="margin-top:10px">Copy private organiser link</button><div class="mut" style="font-size:12.5px;margin-top:6px">The organiser link opens owner controls on another device, like the Android app. Keep it private: anyone with it can manage this calendar.</div>';
@@ -776,15 +781,25 @@ function regPage(){
   fetch('/api/tournaments/'+id).then(function(r){return r.json().then(function(j){return{ok:r.ok,j:j}})}).then(function(r){
     if(!r.ok){app.innerHTML=top+'<div class="warn" style="margin-top:30px">Tournament not found.</div>'+FOOT;return}
     var name=r.j.name;
+    var prows='';for(var pi=0;pi<15;pi++)prows+='<div class="prow"><input class="rpname" maxlength="24" placeholder="Player '+(pi+1)+' name"><input class="rpemp" maxlength="24" placeholder="Employee ID"></div>';
     app.innerHTML=top+'<div class="hero wide"><h2 class="fire">'+esc(name)+'</h2><p>Team registration</p></div>'+
     '<div class="card"><div class="mut">Enter your team details. The organiser reviews every team before it shows in the app.</div>'+
     (rk?'':'<div class="warn" style="margin-top:8px">This link looks incomplete. Ask the organiser to share the full registration link again.</div>')+
     '<label>Team name</label><input id="rname" maxlength="24" placeholder="Your team name">'+
-    '<label>Players (one per line, 2 to 15)</label><textarea id="rplayers" placeholder="One name per line"></textarea>'+
+    '<label>Players (2 to 15) - every player needs an employee ID</label>'+prows+
     '<button class="btn pri" id="rgo" style="margin-top:14px">Submit team</button></div>'+FOOT;
     document.getElementById('rgo').onclick=function(){
       var b=this;b.disabled=true;
-      var players=document.getElementById('rplayers').value.split('\n').map(function(x){return x.trim()}).filter(Boolean);
+      var rns=Array.prototype.slice.call(document.querySelectorAll('.rpname')),res=Array.prototype.slice.call(document.querySelectorAll('.rpemp'));
+      var players=[];
+      for(var ri=0;ri<rns.length;ri++){
+        var pn=rns[ri].value.trim(),pe=res[ri].value.trim();
+        if(!pn&&!pe)continue;
+        if(!pn){toast('Every player row needs a name');b.disabled=false;return}
+        if(!pe){toast('Every player needs an employee ID');b.disabled=false;return}
+        players.push({name:pn,empId:pe});
+      }
+      if(players.length<2){toast('Add at least 2 players');b.disabled=false;return}
       api('POST','/api/tournaments/'+id+'/teams',{name:v('rname'),players:players},null,rk?{'x-reg-key':rk}:{}).then(function(rr){
         b.disabled=false;
         if(!rr.ok){toast(rr.j.error||'Could not submit');return}
