@@ -19,7 +19,7 @@ function makeStore() {
       id TEXT PRIMARY KEY, config JSONB NOT NULL, events JSONB NOT NULL DEFAULT '[]', key_hash TEXT NOT NULL,
       rev INTEGER NOT NULL DEFAULT 0, created_at TIMESTAMPTZ NOT NULL DEFAULT now(), updated_at TIMESTAMPTZ NOT NULL DEFAULT now())`);
     const tready = pool.query(`CREATE TABLE IF NOT EXISTS cricket_tournaments (
-      id TEXT PRIMARY KEY, name TEXT NOT NULL, key_hash TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now())`).then(() => pool.query("ALTER TABLE cricket_tournaments ADD COLUMN IF NOT EXISTS teams JSONB NOT NULL DEFAULT '[]', ADD COLUMN IF NOT EXISTS reg_key_hash TEXT"));
+      id TEXT PRIMARY KEY, name TEXT NOT NULL, key_hash TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now())`).then(() => pool.query("ALTER TABLE cricket_tournaments ADD COLUMN IF NOT EXISTS teams JSONB NOT NULL DEFAULT '[]', ADD COLUMN IF NOT EXISTS reg_key_hash TEXT, ADD COLUMN IF NOT EXISTS listed BOOLEAN NOT NULL DEFAULT false"));
     const row = (r) => r && { id: r.id, config: r.config, events: r.events, keyHash: r.key_hash, rev: r.rev, updated: r.updated_at };
     return {
       kind: 'durable',
@@ -27,17 +27,19 @@ function makeStore() {
       async count() { await ready; const r = await pool.query('SELECT count(*)::int AS n FROM cricket_matches'); return r.rows[0].n; },
       async create(m) { await ready; await pool.query('INSERT INTO cricket_matches(id,config,events,key_hash) VALUES($1,$2,$3,$4)', [m.id, JSON.stringify(m.config), '[]', m.keyHash]); },
       async tcreate(t) { await tready; await pool.query('INSERT INTO cricket_tournaments(id,name,key_hash) VALUES($1,$2,$3)', [t.id, t.name, t.keyHash]); },
-      async tget(id) { await tready; const r = await pool.query('SELECT * FROM cricket_tournaments WHERE id=$1', [id]); const x = r.rows[0]; return x && { id: x.id, name: x.name, keyHash: x.key_hash, teams: Array.isArray(x.teams) ? x.teams : [], regKeyHash: x.reg_key_hash || null }; },
+      async tget(id) { await tready; const r = await pool.query('SELECT * FROM cricket_tournaments WHERE id=$1', [id]); const x = r.rows[0]; return x && { id: x.id, name: x.name, keyHash: x.key_hash, teams: Array.isArray(x.teams) ? x.teams : [], regKeyHash: x.reg_key_hash || null, listed: !!x.listed }; },
       async tsetTeams(id, teams) { await tready; await pool.query('UPDATE cricket_tournaments SET teams=$2 WHERE id=$1', [id, JSON.stringify(teams)]); },
       async tsetReg(id, regKeyHash) { await tready; await pool.query('UPDATE cricket_tournaments SET reg_key_hash=$2 WHERE id=$1', [id, regKeyHash]); },
+      async tsetListed(id, listed) { await tready; const r = await pool.query('UPDATE cricket_tournaments SET listed=$2 WHERE id=$1', [id, !!listed]); return r.rowCount === 1; },
+      async listedTournaments() { await tready; const r = await pool.query('SELECT id,name FROM cricket_tournaments WHERE listed ORDER BY created_at'); return r.rows.map((x) => ({ id: x.id, name: x.name })); },
       async trename(id, name) { await tready; const r = await pool.query('UPDATE cricket_tournaments SET name=$2 WHERE id=$1', [id, name]); return r.rowCount === 1; },
       async tcount() { await tready; const r = await pool.query('SELECT count(*)::int AS n FROM cricket_tournaments'); return r.rows[0].n; },
       async byTournament(tid) { await ready; const r = await pool.query("SELECT * FROM cricket_matches WHERE config->>'tid'=$1 ORDER BY created_at LIMIT 300", [tid]); return r.rows.map(row); },
       async setConfig(id, config, bump) { await ready; await pool.query(bump ? 'UPDATE cricket_matches SET config=$1, rev=rev+1, updated_at=now() WHERE id=$2' : 'UPDATE cricket_matches SET config=$1 WHERE id=$2', [JSON.stringify(config), id]); },
       async allMatches() { await ready; const r = await pool.query('SELECT * FROM cricket_matches ORDER BY created_at'); return r.rows.map((x) => Object.assign(row(x), { created: x.created_at })); },
-      async allTournaments() { await tready; const r = await pool.query('SELECT * FROM cricket_tournaments ORDER BY created_at'); return r.rows.map((x) => ({ id: x.id, name: x.name, keyHash: x.key_hash, teams: Array.isArray(x.teams) ? x.teams : [], regKeyHash: x.reg_key_hash || null, created: x.created_at })); },
+      async allTournaments() { await tready; const r = await pool.query('SELECT * FROM cricket_tournaments ORDER BY created_at'); return r.rows.map((x) => ({ id: x.id, name: x.name, keyHash: x.key_hash, teams: Array.isArray(x.teams) ? x.teams : [], regKeyHash: x.reg_key_hash || null, listed: !!x.listed, created: x.created_at })); },
       async importMatch(m) { await ready; const r = await pool.query('INSERT INTO cricket_matches(id,config,events,key_hash,rev,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (id) DO NOTHING', [m.id, JSON.stringify(m.config), JSON.stringify(m.events), m.keyHash, m.rev, m.created || m.updated, m.updated]); return r.rowCount === 1; },
-      async importTournament(t) { await tready; const r = await pool.query('INSERT INTO cricket_tournaments(id,name,key_hash,created_at,teams,reg_key_hash) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT (id) DO NOTHING', [t.id, t.name, t.keyHash, t.created || new Date().toISOString(), JSON.stringify(Array.isArray(t.teams) ? t.teams : []), t.regKeyHash || null]); return r.rowCount === 1; },
+      async importTournament(t) { await tready; const r = await pool.query('INSERT INTO cricket_tournaments(id,name,key_hash,created_at,teams,reg_key_hash,listed) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (id) DO NOTHING', [t.id, t.name, t.keyHash, t.created || new Date().toISOString(), JSON.stringify(Array.isArray(t.teams) ? t.teams : []), t.regKeyHash || null, t.listed === true]); return r.rowCount === 1; },
       async update(id, events, expectRev) {
         await ready;
         const r = await pool.query('UPDATE cricket_matches SET events=$1, rev=rev+1, updated_at=now() WHERE id=$2 AND rev=$3 RETURNING rev', [JSON.stringify(events), id, expectRev]);
@@ -64,13 +66,15 @@ function makeStore() {
     async trename(id, name) { if (!tdb[id]) return false; tdb[id].name = name; tsave(); return true; },
     async tsetTeams(id, teams) { if (tdb[id]) { tdb[id].teams = teams; tsave(); } },
     async tsetReg(id, regKeyHash) { if (tdb[id]) { tdb[id].regKeyHash = regKeyHash; tsave(); } },
+    async tsetListed(id, listed) { if (!tdb[id]) return false; tdb[id].listed = !!listed; tsave(); return true; },
+    async listedTournaments() { return Object.values(tdb).filter((t) => t.listed).map((t) => ({ id: t.id, name: t.name })); },
     async tcount() { return Object.keys(tdb).length; },
     async byTournament(tid) { return Object.values(db).filter((m) => m.config && m.config.tid === tid).map((m) => JSON.parse(JSON.stringify(m))); },
     async setConfig(id, config, bump) { if (db[id]) { db[id].config = config; if (bump) { db[id].rev = (db[id].rev || 0) + 1; db[id].updated = new Date().toISOString(); } save(); } },
     async allMatches() { return Object.values(db).map((m) => JSON.parse(JSON.stringify(m))); },
     async allTournaments() { return Object.values(tdb).map((t) => Object.assign({}, t)); },
     async importMatch(m) { if (db[m.id]) return false; db[m.id] = { id: m.id, config: m.config, events: m.events, keyHash: m.keyHash, rev: m.rev, updated: m.updated }; save(); return true; },
-    async importTournament(t) { if (tdb[t.id]) return false; tdb[t.id] = { id: t.id, name: t.name, keyHash: t.keyHash, teams: Array.isArray(t.teams) ? t.teams : [], regKeyHash: t.regKeyHash || null }; tsave(); return true; },
+    async importTournament(t) { if (tdb[t.id]) return false; tdb[t.id] = { id: t.id, name: t.name, keyHash: t.keyHash, teams: Array.isArray(t.teams) ? t.teams : [], regKeyHash: t.regKeyHash || null, listed: t.listed === true }; tsave(); return true; },
     async update(id, events, expectRev) { const m = db[id]; if (!m || m.rev !== expectRev) return false; m.events = events; m.rev++; m.updated = new Date().toISOString(); save(); return true; },
   };
 }
@@ -184,7 +188,7 @@ async function handle(req, res) {
   if (p === '/healthz') return send(res, 200, { ok: true, storage: store.kind });
   if (p === '/api/info') return send(res, 200, { storage: store.kind });
   let mt;
-  if (p === '/api/backup' || p === '/api/restore' || p === '/api/admin/tournament-name') {
+  if (p === '/api/backup' || p === '/api/restore' || p === '/api/admin/tournament-name' || p === '/api/admin/tournament-listed') {
     // Owner-only. Disabled unless BACKUP_TOKEN is set. Backups contain match data and hashed keys, never raw keys.
     const tok = process.env.BACKUP_TOKEN;
     if (!tok || tok.length < 24) return send(res, 404, { error: 'Unknown API' });
@@ -202,6 +206,11 @@ async function handle(req, res) {
       if (!body || !/^[a-z0-9]{6,12}$/.test(String(body.id || '')) || !nm) return send(res, 400, { error: 'Need tournament id and a name up to 40 characters' });
       return (await store.trename(body.id, nm)) ? send(res, 200, { ok: true, id: body.id, name: nm }) : send(res, 404, { error: 'Tournament not found' });
     }
+    if (p === '/api/admin/tournament-listed' && req.method === 'POST') {
+      const body = await readBody(req, 2e3);
+      if (!body || !/^[a-z0-9]{6,12}$/.test(String(body.id || ''))) return send(res, 400, { error: 'Need tournament id' });
+      return (await store.tsetListed(body.id, !!body.listed)) ? send(res, 200, { ok: true, id: body.id, listed: !!body.listed }) : send(res, 404, { error: 'Tournament not found' });
+    }
     if (p === '/api/restore' && req.method === 'POST') {
       const body = await readBody(req, 5e6);
       if (!body || body.format !== 'cricket-backup' || body.version !== 1 || !Array.isArray(body.matches) || !Array.isArray(body.tournaments)) return send(res, 400, { error: 'Not a valid backup file' });
@@ -210,7 +219,7 @@ async function handle(req, res) {
       for (const t of body.tournaments) {
         if (!t || !idOk(t.id) || !hashOk(t.keyHash) || !engine.cleanName(t.name, 40)) { out.tournaments.rejected++; continue; }
         if (t.regKeyHash !== undefined && t.regKeyHash !== null && !hashOk(t.regKeyHash)) { out.tournaments.rejected++; continue; }
-        (await store.importTournament({ id: t.id, name: engine.cleanName(t.name, 40), keyHash: t.keyHash, created: t.created, teams: cleanStoredTeams(t.teams), regKeyHash: t.regKeyHash || null })) ? out.tournaments.added++ : out.tournaments.skipped++;
+        (await store.importTournament({ id: t.id, name: engine.cleanName(t.name, 40), keyHash: t.keyHash, created: t.created, teams: cleanStoredTeams(t.teams), regKeyHash: t.regKeyHash || null, listed: t.listed === true })) ? out.tournaments.added++ : out.tournaments.skipped++;
       }
       for (const m of body.matches) {
         let ok = m && idOk(m.id) && hashOk(m.keyHash) && Array.isArray(m.events) && m.events.length <= 800 && m.config && typeof m.config === 'object';
@@ -251,12 +260,15 @@ async function handle(req, res) {
     const ms = await store.byTournament(t.id);
     return send(res, 200, { format: 'cricket-backup', version: 1, exportedAt: new Date().toISOString(), storage: store.kind, counts: { matches: ms.length, tournaments: 1 }, tournaments: [{ id: t.id, name: t.name, keyHash: t.keyHash, teams: cleanStoredTeams(t.teams), regKeyHash: t.regKeyHash || null }], matches: ms.map((m) => ({ id: m.id, config: m.config, events: m.events, keyHash: m.keyHash, rev: m.rev, updated: m.updated })) });
   }
+  if (p === '/api/tournaments/listed' && req.method === 'GET') {
+    return send(res, 200, { tournaments: await store.listedTournaments() });
+  }
   if ((mt = p.match(/^\/api\/tournaments\/([a-z0-9]{6,12})$/)) && req.method === 'GET') {
     const t = await store.tget(mt[1]);
     if (!t) return send(res, 404, { error: 'Tournament not found' });
     const ms = await store.byTournament(t.id);
     const teams = cleanStoredTeams(t.teams);
-    const resp = { id: t.id, name: t.name, matches: ms.map(summary),
+    const resp = { id: t.id, name: t.name, listed: !!t.listed, matches: ms.map(summary),
       teams: teams.filter((x) => x.status === 'approved').map((x) => ({ id: x.id, name: x.name, players: x.players.map((p) => p.name) })) };
     const orgKey = req.headers['x-org-key'];
     if (orgKey) {
@@ -281,6 +293,16 @@ async function handle(req, res) {
     if (!/^[A-Za-z0-9]{10,24}$/.test(rk)) return send(res, 400, { error: 'Bad registration key' });
     await store.tsetReg(t.id, sha(rk));
     return send(res, 200, { ok: true, registration: 'open' });
+  }
+  if ((mt = p.match(/^\/api\/tournaments\/([a-z0-9]{6,12})\/listed$/)) && req.method === 'POST') {
+    const ip = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
+    if (badAuth(ip)) return send(res, 429, { error: 'Too many failed attempts. Try again later.' });
+    const t = await store.tget(mt[1]);
+    if (!t) return send(res, 404, { error: 'Tournament not found' });
+    if (!keyEq(req.headers['x-org-key'], t.keyHash)) { noteBad(ip); return send(res, 403, { error: 'Only the tournament organiser can change home listing.' }); }
+    const body = await readBody(req, 2e3);
+    await store.tsetListed(t.id, !!(body && body.listed));
+    return send(res, 200, { ok: true, listed: !!(body && body.listed) });
   }
   if ((mt = p.match(/^\/api\/tournaments\/([a-z0-9]{6,12})\/teams$/)) && req.method === 'POST') {
     const ip = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
