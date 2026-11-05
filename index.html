@@ -182,6 +182,8 @@ label{color:#6d6791}
 .preg b{font-size:17px;display:block}
 .pregrow{display:flex;gap:8px;margin-top:8px}
 .pregrow .btn{flex:1}
+.prow{display:flex;justify-content:space-between;gap:10px;padding:4px 0;border-top:1px dashed #f0dca0}
+.prow:first-child{border-top:0}
 .prow{display:flex;gap:8px;margin-bottom:8px}
 .prow .rpname{flex:3}
 .prow .rpemp{flex:2}
@@ -464,9 +466,9 @@ function renderT(){
     h+='<button class="btn sec" id="nreg" style="margin-top:10px">'+(T.registration==='open'?'Create new link (disables the old one)':'Create registration link')+'</button>';
     var pend=T.pendingTeams||[];
     h+='<h1>Waiting for approval ('+pend.length+')</h1>';
-    h+=pend.length?pend.map(function(tm){return '<div class="preg"><b class="fire">'+esc(tm.name)+'</b><div class="mut" style="margin-top:2px">'+tm.players.map(function(p){return esc(p.name)+(p.empId?' (ID: '+esc(p.empId)+')':'')}).join(', ')+'</div><div class="pregrow"><button class="btn pri" data-tap="'+esc(tm.id)+'">Approve</button><button class="btn sec" data-trm="'+esc(tm.id)+'">Remove</button></div></div>'}).join(''):'<div class="mut">No teams waiting.</div>';
+    h+=pend.length?pend.map(function(tm){return '<div class="preg"><b class="fire">'+esc(tm.name)+'</b><div style="margin-top:2px">'+tm.players.map(function(p){return '<div class="prow"><span>'+esc(p.name)+'</span><span class="mut">'+(p.empId?'ID: '+esc(p.empId):'')+'</span></div>'}).join('')+'</div><div class="pregrow"><button class="btn pri" data-tap="'+esc(tm.id)+'">Approve</button><button class="btn sec" data-trm="'+esc(tm.id)+'">Remove</button></div></div>'}).join(''):'<div class="mut">No teams waiting.</div>';
     var tapp=T.approvedTeams||[];
-    if(tapp.length){h+='<h1>Approved teams &amp; player IDs (only you see this)</h1>'+tapp.map(function(tm){return '<div class="preg"><b class="fire">'+esc(tm.name)+'</b><div class="mut" style="margin-top:2px">'+tm.players.map(function(p){return esc(p.name)+(p.empId?' (ID: '+esc(p.empId)+')':'')}).join(', ')+'</div></div>'}).join('')}
+    if(tapp.length){h+='<h1>Approved teams &amp; player IDs (only you see this)</h1>'+tapp.map(function(tm){return '<div class="preg"><b class="fire">'+esc(tm.name)+'</b><div style="margin-top:2px">'+tm.players.map(function(p){return '<div class="prow"><span>'+esc(p.name)+'</span><span class="mut">'+(p.empId?'ID: '+esc(p.empId):'')+'</span></div>'}).join('')+'</div></div>'}).join('')}
     h+='</div>';
   }
   if(own)h+='<button class="btn pri" id="addm" style="margin-top:6px">Add a match</button><button class="btn sec" id="dltb" style="margin-top:10px">Download tournament backup (file)</button><button class="btn sec" id="corg" style="margin-top:10px">Copy private organiser link</button><div class="mut" style="font-size:12.5px;margin-top:6px">The organiser link opens owner controls on another device, like the Android app. Keep it private: anyone with it can manage this calendar.</div>';
