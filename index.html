@@ -369,30 +369,41 @@ function orgPane(){
   return h;
 }
 function viewPane(){
-  var ids=knownTs(),h='<b>Watching the scores?</b>';
-  if(ids.length){
-    h+='<span class="mut">Live scores and scorecards for tournaments on this device - tap a match to open it:</span>';
-    ids.forEach(function(t){h+='<div class="vgrp" id="vg-'+esc(t.id)+'"><b class="fire">'+esc(t.name)+'</b><div class="mut" style="margin-top:6px">Loading scores...</div></div>'});
-  }else{
-    h+='<span class="mut">No sign-in, nothing to create. Open the match link or calendar link the organiser shared - live scores, commentary and results update by themselves. Got a link on WhatsApp? Tap it, or paste it in the Open a link box below.</span>';
-  }
+  var h='<b>Watching the scores?</b><span class="mut" id="vlead"></span><div id="vgrps">';
+  knownTs().forEach(function(t){h+='<div class="vgrp" id="vg-'+esc(t.id)+'" data-n="'+esc(t.name)+'"><b class="fire">'+esc(t.name)+'</b><div class="mut" style="margin-top:6px">Loading scores...</div></div>'});
+  h+='</div><span class="mut" id="vexp" style="display:none">No sign-in, nothing to create. Open the match link or calendar link the organiser shared - live scores, commentary and results update by themselves. Got a link on WhatsApp? Tap it, or paste it in the Open a link box below.</span>';
   h+='<button class="btn sec small" style="margin-top:10px" data-go="olink">Open a shared link</button>';
   return h;
 }
+function fillViewerGroup(g){
+  var tid=g.id.slice(3),nm=g.getAttribute('data-n')||'Tournament';
+  function fail(){if(document.body.contains(g))g.innerHTML='<b class="fire">'+esc(nm)+'</b><div class="mut" style="margin-top:6px">Could not load scores. <a href="/t/'+esc(tid)+'">Open the calendar</a></div>'}
+  fetch('/api/tournaments/'+encodeURIComponent(tid)).then(function(r){return r.ok?r.json():null}).then(function(j){
+    if(!document.body.contains(g))return;
+    if(!j){fail();return}
+    function rk(s){return s==='live'?0:s==='done'?1:2}
+    var ms=(j.matches||[]).slice().sort(function(a,b){var d=rk(a.status)-rk(b.status);if(d)return d;var ad=a.date||'',bd=b.date||'';return ad<bd?1:ad>bd?-1:0});
+    var show=ms.slice(0,3),h='<b class="fire">'+esc(j.name||nm)+'</b>';
+    h+=show.length?show.map(matchCard).join(''):'<div class="mut" style="margin-top:6px">No matches yet.</div>';
+    h+='<div style="margin-top:8px"><a href="/t/'+esc(tid)+'">Full calendar &amp; all matches</a></div>';
+    g.innerHTML=h;
+  }).catch(fail);
+}
 function fillViewerScores(){
-  knownTs().forEach(function(t){
-    var g=document.getElementById('vg-'+t.id);if(!g)return;
-    function fail(){if(document.body.contains(g))g.innerHTML='<b class="fire">'+esc(t.name)+'</b><div class="mut" style="margin-top:6px">Could not load scores. <a href="/t/'+esc(t.id)+'">Open the calendar</a></div>'}
-    fetch('/api/tournaments/'+encodeURIComponent(t.id)).then(function(r){return r.ok?r.json():null}).then(function(j){
-      if(!document.body.contains(g))return;
-      if(!j){fail();return}
-      function rk(s){return s==='live'?0:s==='done'?1:2}
-      var ms=(j.matches||[]).slice().sort(function(a,b){var d=rk(a.status)-rk(b.status);if(d)return d;var ad=a.date||'',bd=b.date||'';return ad<bd?1:ad>bd?-1:0});
-      var show=ms.slice(0,3),h='<b class="fire">'+esc(j.name||t.name)+'</b>';
-      h+=show.length?show.map(matchCard).join(''):'<div class="mut" style="margin-top:6px">No matches yet.</div>';
-      h+='<div style="margin-top:8px"><a href="/t/'+esc(t.id)+'">Full calendar &amp; all matches</a></div>';
-      g.innerHTML=h;
-    }).catch(fail);
+  var lead=document.getElementById('vlead'),grps=document.getElementById('vgrps'),exp=document.getElementById('vexp');
+  if(!grps)return;
+  fetch('/api/tournaments/listed').then(function(r){return r.ok?r.json():null}).catch(function(){return null}).then(function(j){
+    if(!document.body.contains(grps))return;
+    ((j&&Array.isArray(j.tournaments))?j.tournaments:[]).forEach(function(t){
+      if(!t||!/^[a-z0-9]{6,12}$/.test(String(t.id))||document.getElementById('vg-'+t.id))return;
+      var d=document.createElement('div');d.className='vgrp';d.id='vg-'+t.id;d.setAttribute('data-n',t.name||'Tournament');
+      d.innerHTML='<b class="fire">'+esc(t.name||'Tournament')+'</b><div class="mut" style="margin-top:6px">Loading scores...</div>';
+      grps.appendChild(d);
+    });
+    var gs=grps.querySelectorAll('.vgrp');
+    if(lead)lead.textContent=gs.length?'Live scores and scorecards - tap a match to open it:':'';
+    if(exp)exp.style.display=gs.length?'none':'inline';
+    Array.prototype.forEach.call(gs,function(g){fillViewerGroup(g)});
   });
 }
 function wireRole(){
@@ -537,7 +548,7 @@ function renderT(){
     if(tapp.length){h+='<h1>Approved teams &amp; player IDs (only you see this)</h1>'+tapp.map(function(tm){return '<div class="preg"><b class="fire">'+esc(tm.name)+'</b><div style="margin-top:2px">'+tm.players.map(function(p){return '<div class="plrow"><span>'+esc(p.name)+'</span><span class="mut">'+(p.empId?'ID: '+esc(p.empId):'')+'</span></div>'}).join('')+'</div></div>'}).join('')}
     h+='</div>';
   }
-  if(own)h+='<button class="btn pri" id="addm" style="margin-top:6px">Add a match</button><button class="btn sec" id="dltb" style="margin-top:10px">Download tournament backup (file)</button><button class="btn sec" id="corg" style="margin-top:10px">Copy private organiser link</button><div class="mut" style="font-size:12.5px;margin-top:6px">The organiser link opens owner controls on another device, like the Android app. Keep it private: anyone with it can manage this calendar.</div>';
+  if(own)h+='<button class="btn pri" id="addm" style="margin-top:6px">Add a match</button><button class="btn sec" id="tgl" style="margin-top:10px">'+(T.listed?'Hide from home Viewer tab':'Show on home Viewer tab')+'</button><div class="mut" style="font-size:12.5px;margin-top:6px">'+(T.listed?'On: anyone who opens the app or website sees live scores for this tournament on the home Viewer tab.':'Off: only people with the calendar link can find this tournament. Turn this on so viewers see scores from the home Viewer tab, no link needed.')+'</div><button class="btn sec" id="dltb" style="margin-top:10px">Download tournament backup (file)</button><button class="btn sec" id="corg" style="margin-top:10px">Copy private organiser link</button><div class="mut" style="font-size:12.5px;margin-top:6px">The organiser link opens owner controls on another device, like the Android app. Keep it private: anyone with it can manage this calendar.</div>';
   h+='</div></div>'+FOOT;app.innerHTML=h;
   document.getElementById('pm').onclick=function(){shiftMonth(-1)};document.getElementById('nm').onclick=function(){shiftMonth(1)};
   var cu2=location.origin+'/t/'+id,ctc=document.getElementById('ctc'),cts=document.getElementById('cts');
@@ -545,6 +556,7 @@ function renderT(){
   if(cts)cts.onclick=function(){if(navigator.share)navigator.share({title:T.name,url:cu2}).catch(function(){});else copyTxt(cu2)};
   Array.prototype.forEach.call(document.querySelectorAll('.day'),function(b){b.onclick=function(){selDay=selDay===b.dataset.d?null:b.dataset.d;renderT()}});
   var a=document.getElementById('addm');if(a)a.onclick=function(){location.href='/?t='+id};
+  var tg=document.getElementById('tgl');if(tg&&own)tg.onclick=function(){tg.disabled=true;api('POST','/api/tournaments/'+id+'/listed',{listed:!T.listed},own.key).then(function(r){tg.disabled=false;if(!r.ok){toast(r.j.error||'Could not update');return}T.listed=!T.listed;toast(T.listed?'Now showing on the home Viewer tab':'Hidden from the home Viewer tab',1);renderT()}).catch(function(){tg.disabled=false;toast('No connection. Try again.')})};
   var nr=document.getElementById('nreg');if(nr&&own)nr.onclick=function(){nr.disabled=true;var rk=randKey(14);
     api('POST','/api/tournaments/'+id+'/reglink',{regKey:rk},own.key).then(function(r){nr.disabled=false;
       if(!r.ok){toast(r.j.error||'Could not create link');return}
