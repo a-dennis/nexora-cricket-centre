@@ -354,16 +354,27 @@ function roleGuide(){
   '<div class="rtabs" id="rtabs"><button data-r="view" class="on">Viewer</button><button data-r="score">Scorer</button><button data-r="org">Organiser</button></div>'+
   '<div class="rolepane" id="rpane"></div></div>';
 }
+function orgPane(){
+  var l=tList(),h='<b>Running the tournament?</b>';
+  if(l.length){
+    h+='<span class="mut">Your tournaments remembered on this device - open one for team approvals, links and match controls:</span>';
+    for(var i=0;i<l.length;i++)h+='<a class="btn sec small" style="margin-top:8px;text-decoration:none" href="/t/'+esc(l[i].id)+'">'+esc(l[i].name)+'</a>';
+    h+='<span class="mut">On another device? Paste your private organiser link in the Open a link box below.</span>';
+  }else{
+    h+='<span class="mut">This device has no saved tournament yet. Open your private organiser link to reach team approvals, links and match controls.</span><button class="btn sec small" style="margin-top:10px" data-go="olink">Open my organiser link</button>';
+  }
+  h+='<button class="btn sec small" style="margin-top:10px" data-go="title">Create a match</button>';
+  return h;
+}
 function wireRole(){
   var t=document.getElementById('rtabs'),pane=document.getElementById('rpane');if(!t||!pane)return;
   var P={
   view:'<b>Watching the scores?</b><span class="mut">No sign-in, nothing to create. Open the match link or calendar link the organiser shared - live scores, commentary and results update by themselves. Got a link on WhatsApp? Tap it, or paste it in the Open a link box below.</span><button class="btn sec small" style="margin-top:10px" data-go="olink">Open a shared link</button>',
   score:'<b>Scoring a match?</b><span class="mut">The organiser gives you a private scorer link for your match. Open it on your phone and enter every ball - viewers see the score update live. Keep your scorer link private, and ask the organiser if you have not received one.</span><button class="btn sec small" style="margin-top:10px" data-go="olink">Open my scorer link</button>',
-  org:'<b>Running the tournament?</b><span class="mut">Use this page to create matches and the tournament calendar. On your tournament page you approve team registrations and copy links: calendar and match links for everyone, scorer links only for scorers. Your organiser link is private - keep it safe. This device remembers it.</span><button class="btn sec small" style="margin-top:10px" data-go="title">Create a match</button>'};
+  org:orgPane()};
   function set(k){pane.innerHTML=P[k];
     var bs=t.querySelectorAll('button');for(var i=0;i<bs.length;i++)bs[i].classList.toggle('on',bs[i].getAttribute('data-r')===k);
-    var g=pane.querySelector('[data-go]');
-    if(g)g.onclick=function(){var el=document.getElementById(g.getAttribute('data-go'));if(el){el.scrollIntoView({behavior:'smooth',block:'center'});el.focus()}};
+    var gs=pane.querySelectorAll('[data-go]');for(var j=0;j<gs.length;j++)(function(g){g.onclick=function(){var el=document.getElementById(g.getAttribute('data-go'));if(el){el.scrollIntoView({behavior:'smooth',block:'center'});el.focus()}}})(gs[j]);
   }
   var bs=t.querySelectorAll('button');for(var i=0;i<bs.length;i++)(function(b){b.onclick=function(){set(b.getAttribute('data-r'))}})(bs[i]);
   set('view');
