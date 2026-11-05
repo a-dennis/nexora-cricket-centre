@@ -211,6 +211,7 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 .rtabs button.on{background:linear-gradient(135deg,#ffc933,#ff9f1c);color:#3a2200;box-shadow:0 3px 8px #ff9f1c55}
 .rolepane{font-size:14px;line-height:1.5;color:#1b1740}
 .rolepane .mut{display:block;margin-top:5px}
+.vgrp{margin-top:12px}.vgrp .mc{margin-top:8px}
 /* fire lettering for tournament names */
 .fire,.hero h2.fire{font-weight:900;letter-spacing:.3px;background:linear-gradient(180deg,#ffb000 0%,#ff6a00 45%,#d4140f 100%);-webkit-background-clip:text;background-clip:text;color:transparent;-webkit-text-fill-color:transparent;-webkit-text-stroke:.5px #8a1a00;filter:drop-shadow(0 0 5px #ff8a0077);animation:flame 2s ease-in-out infinite alternate}
 @keyframes flame{from{filter:drop-shadow(0 0 3px #ff8a0055)}to{filter:drop-shadow(0 0 9px #ffb000bb) drop-shadow(0 -1px 2px #ff3d0055)}}
@@ -342,6 +343,7 @@ function tSetReg(id,rk){try{var l=tList();l.forEach(function(t){if(t.id===id)t.r
 function randKey(n){var c='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789',a=new Uint8Array(n);crypto.getRandomValues(a);var s='';for(var i=0;i<n;i++)s+=c[a[i]%c.length];return s}
 function vList(){try{return JSON.parse(localStorage.getItem('ct_view')||'[]').filter(function(t){return t&&t.id})}catch(e){return[]}}
 function vSave(t){try{var l=vList().filter(function(x){return x.id!==t.id});l.push({id:t.id,name:t.name});localStorage.setItem('ct_view',JSON.stringify(l))}catch(e){}}
+function knownTs(){var seen={},out=[];tList().concat(vList()).forEach(function(t){if(t&&t.id&&!seen[t.id]){seen[t.id]=1;out.push({id:t.id,name:t.name})}});return out}
 function pad2(n){return(n<10?'0':'')+n}
 function todayStr(){var d=new Date();return d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate())}
 var MON=['January','February','March','April','May','June','July','August','September','October','November','December'];
@@ -366,15 +368,43 @@ function orgPane(){
   h+='<button class="btn sec small" style="margin-top:10px" data-go="title">Create a match</button>';
   return h;
 }
+function viewPane(){
+  var ids=knownTs(),h='<b>Watching the scores?</b>';
+  if(ids.length){
+    h+='<span class="mut">Live scores and scorecards for tournaments on this device - tap a match to open it:</span>';
+    ids.forEach(function(t){h+='<div class="vgrp" id="vg-'+esc(t.id)+'"><b class="fire">'+esc(t.name)+'</b><div class="mut" style="margin-top:6px">Loading scores...</div></div>'});
+  }else{
+    h+='<span class="mut">No sign-in, nothing to create. Open the match link or calendar link the organiser shared - live scores, commentary and results update by themselves. Got a link on WhatsApp? Tap it, or paste it in the Open a link box below.</span>';
+  }
+  h+='<button class="btn sec small" style="margin-top:10px" data-go="olink">Open a shared link</button>';
+  return h;
+}
+function fillViewerScores(){
+  knownTs().forEach(function(t){
+    var g=document.getElementById('vg-'+t.id);if(!g)return;
+    function fail(){if(document.body.contains(g))g.innerHTML='<b class="fire">'+esc(t.name)+'</b><div class="mut" style="margin-top:6px">Could not load scores. <a href="/t/'+esc(t.id)+'">Open the calendar</a></div>'}
+    fetch('/api/tournaments/'+encodeURIComponent(t.id)).then(function(r){return r.ok?r.json():null}).then(function(j){
+      if(!document.body.contains(g))return;
+      if(!j){fail();return}
+      function rk(s){return s==='live'?0:s==='done'?1:2}
+      var ms=(j.matches||[]).slice().sort(function(a,b){var d=rk(a.status)-rk(b.status);if(d)return d;var ad=a.date||'',bd=b.date||'';return ad<bd?1:ad>bd?-1:0});
+      var show=ms.slice(0,3),h='<b class="fire">'+esc(j.name||t.name)+'</b>';
+      h+=show.length?show.map(matchCard).join(''):'<div class="mut" style="margin-top:6px">No matches yet.</div>';
+      h+='<div style="margin-top:8px"><a href="/t/'+esc(t.id)+'">Full calendar &amp; all matches</a></div>';
+      g.innerHTML=h;
+    }).catch(fail);
+  });
+}
 function wireRole(){
   var t=document.getElementById('rtabs'),pane=document.getElementById('rpane');if(!t||!pane)return;
   var P={
-  view:'<b>Watching the scores?</b><span class="mut">No sign-in, nothing to create. Open the match link or calendar link the organiser shared - live scores, commentary and results update by themselves. Got a link on WhatsApp? Tap it, or paste it in the Open a link box below.</span><button class="btn sec small" style="margin-top:10px" data-go="olink">Open a shared link</button>',
+  view:viewPane(),
   score:'<b>Scoring a match?</b><span class="mut">The organiser gives you a private scorer link for your match. Open it on your phone and enter every ball - viewers see the score update live. Keep your scorer link private, and ask the organiser if you have not received one.</span><button class="btn sec small" style="margin-top:10px" data-go="olink">Open my scorer link</button>',
   org:orgPane()};
   function set(k){pane.innerHTML=P[k];
     var bs=t.querySelectorAll('button');for(var i=0;i<bs.length;i++)bs[i].classList.toggle('on',bs[i].getAttribute('data-r')===k);
     var gs=pane.querySelectorAll('[data-go]');for(var j=0;j<gs.length;j++)(function(g){g.onclick=function(){var el=document.getElementById(g.getAttribute('data-go'));if(el){el.scrollIntoView({behavior:'smooth',block:'center'});el.focus()}}})(gs[j]);
+    if(k==='view')fillViewerScores();
   }
   var bs=t.querySelectorAll('button');for(var i=0;i<bs.length;i++)(function(b){b.onclick=function(){set(b.getAttribute('data-r'))}})(bs[i]);
   set('view');
