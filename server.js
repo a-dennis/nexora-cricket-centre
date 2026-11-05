@@ -19,7 +19,7 @@ function makeStore() {
       id TEXT PRIMARY KEY, config JSONB NOT NULL, events JSONB NOT NULL DEFAULT '[]', key_hash TEXT NOT NULL,
       rev INTEGER NOT NULL DEFAULT 0, created_at TIMESTAMPTZ NOT NULL DEFAULT now(), updated_at TIMESTAMPTZ NOT NULL DEFAULT now())`);
     const tready = pool.query(`CREATE TABLE IF NOT EXISTS cricket_tournaments (
-      id TEXT PRIMARY KEY, name TEXT NOT NULL, key_hash TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now())`);
+      id TEXT PRIMARY KEY, name TEXT NOT NULL, key_hash TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now())`).then(() => pool.query("ALTER TABLE cricket_tournaments ADD COLUMN IF NOT EXISTS teams JSONB NOT NULL DEFAULT '[]', ADD COLUMN IF NOT EXISTS reg_key_hash TEXT"));
     const row = (r) => r && { id: r.id, config: r.config, events: r.events, keyHash: r.key_hash, rev: r.rev, updated: r.updated_at };
     return {
       kind: 'durable',
@@ -27,15 +27,17 @@ function makeStore() {
       async count() { await ready; const r = await pool.query('SELECT count(*)::int AS n FROM cricket_matches'); return r.rows[0].n; },
       async create(m) { await ready; await pool.query('INSERT INTO cricket_matches(id,config,events,key_hash) VALUES($1,$2,$3,$4)', [m.id, JSON.stringify(m.config), '[]', m.keyHash]); },
       async tcreate(t) { await tready; await pool.query('INSERT INTO cricket_tournaments(id,name,key_hash) VALUES($1,$2,$3)', [t.id, t.name, t.keyHash]); },
-      async tget(id) { await tready; const r = await pool.query('SELECT * FROM cricket_tournaments WHERE id=$1', [id]); const x = r.rows[0]; return x && { id: x.id, name: x.name, keyHash: x.key_hash }; },
+      async tget(id) { await tready; const r = await pool.query('SELECT * FROM cricket_tournaments WHERE id=$1', [id]); const x = r.rows[0]; return x && { id: x.id, name: x.name, keyHash: x.key_hash, teams: Array.isArray(x.teams) ? x.teams : [], regKeyHash: x.reg_key_hash || null }; },
+      async tsetTeams(id, teams) { await tready; await pool.query('UPDATE cricket_tournaments SET teams=$2 WHERE id=$1', [id, JSON.stringify(teams)]); },
+      async tsetReg(id, regKeyHash) { await tready; await pool.query('UPDATE cricket_tournaments SET reg_key_hash=$2 WHERE id=$1', [id, regKeyHash]); },
       async trename(id, name) { await tready; const r = await pool.query('UPDATE cricket_tournaments SET name=$2 WHERE id=$1', [id, name]); return r.rowCount === 1; },
       async tcount() { await tready; const r = await pool.query('SELECT count(*)::int AS n FROM cricket_tournaments'); return r.rows[0].n; },
       async byTournament(tid) { await ready; const r = await pool.query("SELECT * FROM cricket_matches WHERE config->>'tid'=$1 ORDER BY created_at LIMIT 300", [tid]); return r.rows.map(row); },
       async setConfig(id, config, bump) { await ready; await pool.query(bump ? 'UPDATE cricket_matches SET config=$1, rev=rev+1, updated_at=now() WHERE id=$2' : 'UPDATE cricket_matches SET config=$1 WHERE id=$2', [JSON.stringify(config), id]); },
       async allMatches() { await ready; const r = await pool.query('SELECT * FROM cricket_matches ORDER BY created_at'); return r.rows.map((x) => Object.assign(row(x), { created: x.created_at })); },
-      async allTournaments() { await tready; const r = await pool.query('SELECT * FROM cricket_tournaments ORDER BY created_at'); return r.rows.map((x) => ({ id: x.id, name: x.name, keyHash: x.key_hash, created: x.created_at })); },
+      async allTournaments() { await tready; const r = await pool.query('SELECT * FROM cricket_tournaments ORDER BY created_at'); return r.rows.map((x) => ({ id: x.id, name: x.name, keyHash: x.key_hash, teams: Array.isArray(x.teams) ? x.teams : [], regKeyHash: x.reg_key_hash || null, created: x.created_at })); },
       async importMatch(m) { await ready; const r = await pool.query('INSERT INTO cricket_matches(id,config,events,key_hash,rev,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (id) DO NOTHING', [m.id, JSON.stringify(m.config), JSON.stringify(m.events), m.keyHash, m.rev, m.created || m.updated, m.updated]); return r.rowCount === 1; },
-      async importTournament(t) { await tready; const r = await pool.query('INSERT INTO cricket_tournaments(id,name,key_hash,created_at) VALUES($1,$2,$3,$4) ON CONFLICT (id) DO NOTHING', [t.id, t.name, t.keyHash, t.created || new Date().toISOString()]); return r.rowCount === 1; },
+      async importTournament(t) { await tready; const r = await pool.query('INSERT INTO cricket_tournaments(id,name,key_hash,created_at,teams,reg_key_hash) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT (id) DO NOTHING', [t.id, t.name, t.keyHash, t.created || new Date().toISOString(), JSON.stringify(Array.isArray(t.teams) ? t.teams : []), t.regKeyHash || null]); return r.rowCount === 1; },
       async update(id, events, expectRev) {
         await ready;
         const r = await pool.query('UPDATE cricket_matches SET events=$1, rev=rev+1, updated_at=now() WHERE id=$2 AND rev=$3 RETURNING rev', [JSON.stringify(events), id, expectRev]);
@@ -60,13 +62,15 @@ function makeStore() {
     async tcreate(t) { tdb[t.id] = { id: t.id, name: t.name, keyHash: t.keyHash }; tsave(); },
     async tget(id) { const t = tdb[id]; return t ? Object.assign({}, t) : null; },
     async trename(id, name) { if (!tdb[id]) return false; tdb[id].name = name; tsave(); return true; },
+    async tsetTeams(id, teams) { if (tdb[id]) { tdb[id].teams = teams; tsave(); } },
+    async tsetReg(id, regKeyHash) { if (tdb[id]) { tdb[id].regKeyHash = regKeyHash; tsave(); } },
     async tcount() { return Object.keys(tdb).length; },
     async byTournament(tid) { return Object.values(db).filter((m) => m.config && m.config.tid === tid).map((m) => JSON.parse(JSON.stringify(m))); },
     async setConfig(id, config, bump) { if (db[id]) { db[id].config = config; if (bump) { db[id].rev = (db[id].rev || 0) + 1; db[id].updated = new Date().toISOString(); } save(); } },
     async allMatches() { return Object.values(db).map((m) => JSON.parse(JSON.stringify(m))); },
     async allTournaments() { return Object.values(tdb).map((t) => Object.assign({}, t)); },
     async importMatch(m) { if (db[m.id]) return false; db[m.id] = { id: m.id, config: m.config, events: m.events, keyHash: m.keyHash, rev: m.rev, updated: m.updated }; save(); return true; },
-    async importTournament(t) { if (tdb[t.id]) return false; tdb[t.id] = { id: t.id, name: t.name, keyHash: t.keyHash }; tsave(); return true; },
+    async importTournament(t) { if (tdb[t.id]) return false; tdb[t.id] = { id: t.id, name: t.name, keyHash: t.keyHash, teams: Array.isArray(t.teams) ? t.teams : [], regKeyHash: t.regKeyHash || null }; tsave(); return true; },
     async update(id, events, expectRev) { const m = db[id]; if (!m || m.rev !== expectRev) return false; m.events = events; m.rev++; m.updated = new Date().toISOString(); save(); return true; },
   };
 }
@@ -114,6 +118,30 @@ function ytId(u) {
   const m = s.match(/(?:youtube\.com\/(?:watch\?[^#]*v=|live\/|embed\/|shorts\/)|youtu\.be\/)([A-Za-z0-9_-]{11})/);
   return m ? m[1] : null;
 }
+// Team registration: same limits as match teams, so an approved team always fits a match.
+function cleanTeamReg(body) {
+  const name = engine.cleanName(body && body.name, 24);
+  const players = Array.isArray(body && body.players) ? body.players.map((p) => engine.cleanName(p, 24)).filter(Boolean) : [];
+  const dedup = []; players.forEach((p) => { if (dedup.indexOf(p) === -1) dedup.push(p); });
+  if (!name) return { error: 'Enter a team name' };
+  if (dedup.length < 2) return { error: 'Add at least 2 players, one per line' };
+  if (dedup.length > 15) return { error: 'A team can have at most 15 players' };
+  return { name, players: dedup };
+}
+// Restore/read validation for stored tournament teams; drops anything malformed.
+function cleanStoredTeams(list) {
+  if (!Array.isArray(list)) return [];
+  const out = [];
+  for (const t of list) {
+    if (!t || typeof t.id !== 'string' || !/^[a-z0-9]{6,12}$/.test(t.id)) continue;
+    const name = engine.cleanName(t.name, 24);
+    const players = Array.isArray(t.players) ? t.players.map((p) => engine.cleanName(p, 24)).filter(Boolean).slice(0, 15) : [];
+    if (!name || players.length < 2) continue;
+    out.push({ id: t.id, name, players, status: t.status === 'approved' ? 'approved' : 'pending', submittedAt: typeof t.submittedAt === 'string' ? t.submittedAt.slice(0, 40) : new Date().toISOString() });
+    if (out.length >= MAX_TEAMS_PER_TOURNAMENT) break;
+  }
+  return out;
+}
 function summary(m) {
   const st = engine.view(m.config, m.events);
   return { id: m.id, title: m.config.title, date: m.config.date || null, teams: m.config.teams.map((t) => t.name),
@@ -123,7 +151,7 @@ function summary(m) {
 const bad = new Map();
 function badAuth(ip) { const now = Date.now(); return (bad.get(ip) || []).filter((t) => now - t < 3600e3).length >= 10; }
 function noteBad(ip) { const now = Date.now(); const a = (bad.get(ip) || []).filter((t) => now - t < 3600e3); a.push(now); bad.set(ip, a); }
-const MAX_TOURNAMENTS = 100, MAX_PER_TOURNAMENT = 200;
+const MAX_TOURNAMENTS = 100, MAX_PER_TOURNAMENT = 200, MAX_TEAMS_PER_TOURNAMENT = 40;
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.json': 'application/json', '.webmanifest': 'application/manifest+json' };
 const STATIC_OK = new Set(['index.html']);
 function serveStatic(res, rel) {
@@ -167,7 +195,8 @@ async function handle(req, res) {
       const out = { tournaments: { added: 0, skipped: 0, rejected: 0 }, matches: { added: 0, skipped: 0, rejected: 0 } };
       for (const t of body.tournaments) {
         if (!t || !idOk(t.id) || !hashOk(t.keyHash) || !engine.cleanName(t.name, 40)) { out.tournaments.rejected++; continue; }
-        (await store.importTournament({ id: t.id, name: engine.cleanName(t.name, 40), keyHash: t.keyHash, created: t.created })) ? out.tournaments.added++ : out.tournaments.skipped++;
+        if (t.regKeyHash !== undefined && t.regKeyHash !== null && !hashOk(t.regKeyHash)) { out.tournaments.rejected++; continue; }
+        (await store.importTournament({ id: t.id, name: engine.cleanName(t.name, 40), keyHash: t.keyHash, created: t.created, teams: cleanStoredTeams(t.teams), regKeyHash: t.regKeyHash || null })) ? out.tournaments.added++ : out.tournaments.skipped++;
       }
       for (const m of body.matches) {
         let ok = m && idOk(m.id) && hashOk(m.keyHash) && Array.isArray(m.events) && m.events.length <= 800 && m.config && typeof m.config === 'object';
@@ -206,13 +235,70 @@ async function handle(req, res) {
     if (!t) return send(res, 404, { error: 'Tournament not found' });
     if (!keyEq(req.headers['x-org-key'], t.keyHash)) { noteBad(ip); return send(res, 403, { error: 'Only the organiser link can download the tournament backup.' }); }
     const ms = await store.byTournament(t.id);
-    return send(res, 200, { format: 'cricket-backup', version: 1, exportedAt: new Date().toISOString(), storage: store.kind, counts: { matches: ms.length, tournaments: 1 }, tournaments: [{ id: t.id, name: t.name, keyHash: t.keyHash }], matches: ms.map((m) => ({ id: m.id, config: m.config, events: m.events, keyHash: m.keyHash, rev: m.rev, updated: m.updated })) });
+    return send(res, 200, { format: 'cricket-backup', version: 1, exportedAt: new Date().toISOString(), storage: store.kind, counts: { matches: ms.length, tournaments: 1 }, tournaments: [{ id: t.id, name: t.name, keyHash: t.keyHash, teams: cleanStoredTeams(t.teams), regKeyHash: t.regKeyHash || null }], matches: ms.map((m) => ({ id: m.id, config: m.config, events: m.events, keyHash: m.keyHash, rev: m.rev, updated: m.updated })) });
   }
   if ((mt = p.match(/^\/api\/tournaments\/([a-z0-9]{6,12})$/)) && req.method === 'GET') {
     const t = await store.tget(mt[1]);
     if (!t) return send(res, 404, { error: 'Tournament not found' });
     const ms = await store.byTournament(t.id);
-    return send(res, 200, { id: t.id, name: t.name, matches: ms.map(summary) });
+    const teams = cleanStoredTeams(t.teams);
+    const resp = { id: t.id, name: t.name, matches: ms.map(summary),
+      teams: teams.filter((x) => x.status === 'approved').map((x) => ({ id: x.id, name: x.name, players: x.players })) };
+    const orgKey = req.headers['x-org-key'];
+    if (orgKey) {
+      const ip = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
+      if (badAuth(ip)) return send(res, 429, { error: 'Too many failed attempts. Try again later.' });
+      if (!keyEq(orgKey, t.keyHash)) { noteBad(ip); return send(res, 403, { error: 'Not allowed' }); }
+      resp.registration = t.regKeyHash ? 'open' : 'closed';
+      resp.pendingTeams = teams.filter((x) => x.status === 'pending').map((x) => ({ id: x.id, name: x.name, players: x.players }));
+    }
+    return send(res, 200, resp);
+  }
+  if ((mt = p.match(/^\/api\/tournaments\/([a-z0-9]{6,12})\/reglink$/)) && req.method === 'POST') {
+    const ip = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
+    if (badAuth(ip)) return send(res, 429, { error: 'Too many failed attempts. Try again later.' });
+    const t = await store.tget(mt[1]);
+    if (!t) return send(res, 404, { error: 'Tournament not found' });
+    if (!keyEq(req.headers['x-org-key'], t.keyHash)) { noteBad(ip); return send(res, 403, { error: 'Only the tournament organiser can manage team registration.' }); }
+    const body = await readBody(req, 2e3);
+    const rk = String(body && body.regKey || '');
+    if (!rk) { await store.tsetReg(t.id, null); return send(res, 200, { ok: true, registration: 'closed' }); }
+    if (!/^[A-Za-z0-9]{10,24}$/.test(rk)) return send(res, 400, { error: 'Bad registration key' });
+    await store.tsetReg(t.id, sha(rk));
+    return send(res, 200, { ok: true, registration: 'open' });
+  }
+  if ((mt = p.match(/^\/api\/tournaments\/([a-z0-9]{6,12})\/teams$/)) && req.method === 'POST') {
+    const ip = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
+    if (limited(ip)) return send(res, 429, { error: 'Too many requests from this connection. Try again later.' });
+    const t = await store.tget(mt[1]);
+    if (!t) return send(res, 404, { error: 'Tournament not found' });
+    if (badAuth(ip)) return send(res, 429, { error: 'Too many failed attempts. Try again later.' });
+    if (!t.regKeyHash || !keyEq(req.headers['x-reg-key'], t.regKeyHash)) { noteBad(ip); return send(res, 403, { error: 'This registration link is not active. Ask the organiser for the current link.' }); }
+    const body = await readBody(req);
+    const c = cleanTeamReg(body);
+    if (c.error) return send(res, 400, { error: c.error });
+    const teams = cleanStoredTeams(t.teams);
+    if (teams.length >= MAX_TEAMS_PER_TOURNAMENT) return send(res, 507, { error: 'This tournament has reached its team limit.' });
+    if (teams.some((x) => x.name.toLowerCase() === c.name.toLowerCase())) return send(res, 409, { error: 'A team with this name is already registered.' });
+    teams.push({ id: rnd(8).toLowerCase(), name: c.name, players: c.players, status: 'pending', submittedAt: new Date().toISOString() });
+    await store.tsetTeams(t.id, teams);
+    return send(res, 201, { ok: true });
+  }
+  if ((mt = p.match(/^\/api\/tournaments\/([a-z0-9]{6,12})\/teams\/([a-z0-9]{6,12})$/)) && req.method === 'POST') {
+    const ip = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
+    if (badAuth(ip)) return send(res, 429, { error: 'Too many failed attempts. Try again later.' });
+    const t = await store.tget(mt[1]);
+    if (!t) return send(res, 404, { error: 'Tournament not found' });
+    if (!keyEq(req.headers['x-org-key'], t.keyHash)) { noteBad(ip); return send(res, 403, { error: 'Only the tournament organiser can review teams.' }); }
+    const body = await readBody(req, 2e3);
+    const teams = cleanStoredTeams(t.teams);
+    const ix = teams.findIndex((x) => x.id === mt[2]);
+    if (ix === -1) return send(res, 404, { error: 'Team not found' });
+    if (body && body.action === 'approve') teams[ix].status = 'approved';
+    else if (body && body.action === 'remove') teams.splice(ix, 1);
+    else return send(res, 400, { error: 'Unknown action' });
+    await store.tsetTeams(t.id, teams);
+    return send(res, 200, { ok: true });
   }
   if ((mt = p.match(/^\/api\/matches\/([a-z0-9]{6,12})\/attach$/)) && req.method === 'POST') {
     const m = await store.get(mt[1]);
@@ -295,7 +381,7 @@ async function handle(req, res) {
   }
   if (p.startsWith('/api/')) return send(res, 404, { error: 'Unknown API' });
   if (req.method !== 'GET' && req.method !== 'HEAD') { res.writeHead(405); return res.end(); }
-  if (p === '/' || /^\/(m|s|t)\/[a-z0-9]+\/?$/.test(p)) return serveStatic(res, 'index.html');
+  if (p === '/' || /^\/(m|s|t|r)\/[a-z0-9]+\/?$/.test(p)) return serveStatic(res, 'index.html');
   return serveStatic(res, p.slice(1));
 }
 
