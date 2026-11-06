@@ -385,7 +385,7 @@ function confetti(ms){
   (function fr(){
     var now=Date.now(),el=now-t0;
     ctx.clearRect(0,0,W,H);
-    if(el<ms-600&&P.length<9000){var want=Math.max(1,Math.round((el-lastSpawn)/1000*1100));lastSpawn=el;for(var ri=0;ri<want;ri++)rp(-20-Math.random()*80)}
+    if(el<ms-600&&P.length<9000){var want=Math.max(1,Math.round((el-lastSpawn)/1000*1500));lastSpawn=el;for(var ri=0;ri<want;ri++){rp(-20-Math.random()*80);P[P.length-1].born=Date.now()-Math.random()*1500}}
     for(var k=P.length-1;k>=0;k--){var p=P[k],age=now-p.born,t=age/1000;
       if(p.t==='c'){
         var x=p.x0+p.vx*t*Math.exp(-.48*t),y=p.y0+p.vy*t+288*d*t*t;
