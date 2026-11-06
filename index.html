@@ -995,8 +995,8 @@ function renderT(){
 }
 function videoCard(){
   if(mode!=='s'||!S||!key)return'';
-  var cv=(S.config&&S.config.videoId&&/^[A-Za-z0-9_-]{11}$/.test(S.config.videoId))?('https://www.youtube.com/watch?v='+S.config.videoId):'';
-  return '<h1>Live video (YouTube)</h1><div class="card"><label>YouTube live link (optional)</label><input id="vidu" type="url" placeholder="https://www.youtube.com/live/..." value="'+esc(cv)+'"><div class="mut" style="font-size:12.5px;margin-top:6px">Start the stream in the YouTube app, copy its link, then paste it here. Viewers will see the video above the live score. Clear it after the match.</div><div class="grid" style="grid-template-columns:1fr 1fr;margin-top:10px"><button class="btn sec" id="vidclr">Clear</button><button class="btn pri" id="vidsv">Save video link</button></div></div>';
+  var ninja=S.config&&ninjaViewUrl(S.config.ninjaView),cv=ninja||((S.config&&S.config.videoId)?('https://www.youtube.com/watch?v='+S.config.videoId):'');
+  return '<h1>Public match video</h1><div class="card"><label>Video source</label><select id="vidsource"><option value="youtube"'+(!ninja?' selected':'')+'>YouTube</option><option value="ninja"'+(ninja?' selected':'')+'>VDO.Ninja VIEW link</option></select><label>Viewing link</label><input id="vidu" type="url" autocomplete="off" placeholder="YouTube link or https://vdo.ninja/?view=..." value="'+esc(cv)+'"><div class="mut" style="font-size:12.5px;margin-top:6px">Saving publishes this viewing link to everyone opening this match. Only share an agreed camera feed. Never paste a camera/push, room or director link. One source at a time; saving replaces the previous public video. The private Organiser preview is separate.</div><div class="mut" style="font-size:12.5px;margin-top:8px">VDO.Ninja: keep the camera phone awake and connected. Each viewer can add upload load on the camera phone; test a small audience first. For a large audience, use YouTube. Clear the public link when finished and stop capture on the phone too.</div><div class="grid" style="grid-template-columns:1fr 1fr;margin-top:10px"><button class="btn sec" id="vidclr">Clear public video</button><button class="btn pri" id="vidsv">Publish viewing link</button></div></div>';
 }
 document.addEventListener('click',function(e){
   var b=e.target&&e.target.closest?e.target.closest('[data-lko],[data-lkc],[data-lkh]'):null;if(!b)return;
@@ -1009,9 +1009,9 @@ document.addEventListener('click',function(e){
   if(mode!=='s'||!S||!key)return;
   var inp=document.getElementById('vidu');
   var val=e.target.id==='vidclr'?'':(inp?inp.value:'');
-  api('POST','/api/matches/'+id+'/video',{video:val}).then(function(r){
+  api('POST','/api/matches/'+id+'/video',{video:val,source:document.getElementById('vidsource').value}).then(function(r){
     if(!r.ok){toast(r.j.error||'Could not save video link');return}
-    if(r.j.videoId){S.config.videoId=r.j.videoId;toast('Video link saved - viewers can now watch',1)}else{delete S.config.videoId;toast('Video link cleared',1)}
+    delete S.config.videoId;delete S.config.ninjaView;if(r.j.videoId)S.config.videoId=r.j.videoId;if(r.j.ninjaView)S.config.ninjaView=r.j.ninjaView;publicVideoOpen='';toast(r.j.videoId||r.j.ninjaView?'Public viewing link saved':'Public video cleared',1);
     if(typeof r.j.rev==='number')S.rev=r.j.rev;
     render();
   }).catch(function(){toast('No connection. Not saved - try again.')});
@@ -1106,13 +1106,23 @@ function ytId(u){
   var m=s.match(/(?:youtube\.com\/(?:watch\?[^#]*v=|live\/|embed\/|shorts\/)|youtu\.be\/)([A-Za-z0-9_-]{11})/);
   return m?m[1]:null;
 }
+var publicVideoOpen='';
 function videoCardView(){
+  var n=S&&S.config&&ninjaViewUrl(S.config.ninjaView);
+  if(n)return '<h1>Live camera</h1><div class="card" style="padding:10px"><div id="publicnjplayer" class="vidwrap"'+(publicVideoOpen===n?'':' style="display:none"')+'></div><button class="btn pri" id="publicnjstart"'+(publicVideoOpen===n?' style="display:none"':'')+'>Watch live camera</button><button class="btn sec" id="publicnjstop"'+(publicVideoOpen===n?'':' style="display:none"')+'>Stop watching</button><div class="sub" style="margin-top:8px">VDO.Ninja camera. Tap Play if asked. Loading is not proof the camera is connected. Video and score may not be in sync.</div></div>';
   var v=S&&S.config&&S.config.videoId;
   if(!v||!/^[A-Za-z0-9_-]{11}$/.test(v))return'';
   return '<h1>Live video</h1><div class="card" style="padding:10px 10px 12px"><div class="vidwrap"><iframe src="https://www.youtube.com/embed/'+v+'" allow="accelerometer; autoplay; encrypted-media; picture-in-picture" allowfullscreen title="Live video"></iframe></div><div class="sub" style="margin-top:8px">Video may run a little behind the score · <a href="https://www.youtube.com/watch?v='+v+'" target="_blank" rel="noopener">Watch on YouTube</a></div></div>';
 }
+function wirePublicNinja(kept){
+  var slot=document.getElementById('publicnjplayer'),start=document.getElementById('publicnjstart'),stop=document.getElementById('publicnjstop');
+  if(!slot)return;
+  var n=ninjaViewUrl(S.config.ninjaView);if(kept&&publicVideoOpen===n)slot.appendChild(kept);else if(publicVideoOpen===n)publicVideoOpen='';
+  start.onclick=function(){publicVideoOpen=n;var f=document.createElement('iframe');f.src=n;f.title='Public live match camera';f.allow='autoplay; fullscreen';f.referrerPolicy='no-referrer';f.allowFullscreen=true;slot.replaceChildren(f);slot.style.display='';start.style.display='none';stop.style.display=''};
+  stop.onclick=function(){publicVideoOpen='';slot.replaceChildren();slot.style.display='none';start.style.display='';stop.style.display='none'};
+}
 function liveTab(){
-  var st=S.state,i=cur(),h=videoCardView()+scoreCard();
+  var st=S.state,i=cur(),h=(ninjaViewUrl(S.config.ninjaView)?'':videoCardView())+scoreCard();
   if(!st.result){
     var on=i.batting.filter(function(b){return b.notOut});
     h+='<h1>Batters</h1><div class="card" style="padding:6px 16px"><table class="tbl"><tr><th>Batter</th><th>R</th><th>B</th><th>4s</th><th>6s</th><th>SR</th></tr>'+
@@ -1178,6 +1188,8 @@ function viewerBody(){return tab==='live'?liveTab():tab==='card'?scorecardTab():
 
 function render(){
   if(!S){app.innerHTML=(err?'<div class="warn" style="margin-top:30px">'+esc(err)+'</div>':'<div class="mut" style="margin-top:40px;text-align:center">Loading match...<br>The free server may take up to a minute to wake up.</div>')+FOOT;return}
+  var publicHost=document.getElementById('publicnjhost'),currentNinja=ninjaViewUrl(S.config.ninjaView);if(publicVideoOpen!==currentNinja)publicVideoOpen='';
+  if(currentNinja){if(!publicHost){publicHost=document.createElement('div');publicHost.id='publicnjhost';app.before(publicHost)}if(publicHost.dataset.source!==currentNinja){publicHost.innerHTML=videoCardView();publicHost.dataset.source=currentNinja;wirePublicNinja(null)}}else if(publicHost){publicHost.remove()}
   var h=head()+tabsHtml()+'<div class="dsk '+(mode==='s'?'sc':'vw')+'"><div class="dl">'+viewerBody()+(mode==='s'?'</div><div class="dr">':'');
   if(mode==='s')h+=scorerPanel()+videoCard()+attachCard()+'<div class="card"><button class="btn sec" id="dlrep">Download match report</button><button class="btn sec" id="dlimg" style="margin-top:10px">Save scorecard as image</button><button class="btn sec" id="dlbk" style="margin-top:10px">Download match backup (file)</button><div class="mut" style="font-size:12.5px;margin-top:8px">The report is a printable match card. The backup file holds every ball and can restore this match later. It never contains your scorer link.</div></div>';
   else{h+='<div class="card" style="margin-top:6px"><button class="btn sec" id="share">Share this live scoreboard</button><button class="btn sec" id="dlrep" style="margin-top:10px">Download match report</button><button class="btn sec" id="dlimg" style="margin-top:10px">Save scorecard as image</button></div>'}
