@@ -629,16 +629,79 @@ function roleGuide(){
   '<div class="rolepane" id="rpane"></div></div>';
 }
 function orgPane(){
-  var l=tList(),h='<b>Running the tournament?</b>';
-  if(l.length){
-    h+='<span class="mut">Your tournaments remembered on this device - open one for team approvals, links and match controls:</span>';
-    for(var i=0;i<l.length;i++)h+='<a class="btn sec small" style="margin-top:8px;text-decoration:none" href="/t/'+esc(l[i].id)+'">'+esc(l[i].name)+'</a>';
-    h+='<span class="mut">On another device? Paste your private organiser link in the Open a link box below.</span>';
-  }else{
-    h+='<span class="mut">This device has no saved tournament yet. Open your private organiser link to reach team approvals, links and match controls.</span><button class="btn sec small" style="margin-top:10px" data-go="olink">Open my organiser link</button>';
+  return '<b>Organiser area</b><div id="orgarea"><span class="mut">Checking sign-in...</span></div>';
+}
+function orgSess(){try{return localStorage.getItem('org_sess')||''}catch(e){return''}}
+function orgSetSess(t){try{if(t)localStorage.setItem('org_sess',t);else localStorage.removeItem('org_sess')}catch(e){}}
+function renderOrg(){
+  var area=document.getElementById('orgarea');if(!area)return;
+  function showLogin(){
+    fetch('/api/auth/status').then(function(r){return r.ok?r.json():null}).then(function(st){
+      if(!document.body.contains(area))return;
+      if(st&&st.setup){
+        area.innerHTML='<span class="mut">All your tournament links, team approvals and match controls live here. Sign in to open them.</span>'+
+        '<label>Username</label><input id="ogu" value="denny" maxlength="24" autocomplete="username">'+
+        '<label>Password</label><input id="ogp" type="password" placeholder="Organiser password" autocomplete="current-password">'+
+        '<button class="btn pri" id="oggo" style="margin-top:12px">Sign in</button>';
+        document.getElementById('oggo').onclick=function(){
+          var b=this;b.disabled=true;
+          api('POST','/api/auth/login',{user:v('ogu'),password:v('ogp')}).then(function(r){
+            b.disabled=false;
+            if(!r.ok){toast((r.j&&r.j.error)||'Wrong username or password');return}
+            orgSetSess(r.j.token);renderOrg();
+          }).catch(function(){b.disabled=false;toast('No connection. Try again.')});
+        };
+      }else{
+        var l=tList();
+        area.innerHTML='<span class="mut">First time here: set the password for this organiser area. It protects every tournament link and control on this screen.</span>'+
+        (l.length?'':'<div class="warn" style="margin-top:8px">Open your private organiser link on this device first, then come back to set the password.</div>')+
+        '<label>Username</label><input id="ogu" value="denny" maxlength="24" autocomplete="username">'+
+        '<label>Choose a password (8+ characters)</label><input id="ogp" type="password" autocomplete="new-password">'+
+        '<label>Password again</label><input id="ogp2" type="password" autocomplete="new-password">'+
+        (l.length?'<button class="btn pri" id="ogset" style="margin-top:12px">Set password</button>':'');
+        var sb=document.getElementById('ogset');
+        if(sb)sb.onclick=function(){
+          var b=this,pw=v('ogp');
+          if(pw.length<8){toast('Password needs at least 8 characters');return}
+          if(pw!==v('ogp2')){toast('Passwords do not match');return}
+          var t=tList()[0];b.disabled=true;
+          api('POST','/api/auth/setup',{tid:t.id,orgKey:t.key,password:pw}).then(function(r){
+            b.disabled=false;
+            if(!r.ok){toast((r.j&&r.j.error)||'Could not set the password');return}
+            toast('Password set. Sign in now.',1);renderOrg();
+          }).catch(function(){b.disabled=false;toast('No connection. Try again.')});
+        };
+      }
+    }).catch(function(){if(document.body.contains(area))area.innerHTML='<span class="mut">No connection. Tap Organiser again to retry.</span>'});
   }
-  h+='<button class="btn sec small" style="margin-top:10px" data-go="title">Create a match</button>';
-  return h;
+  var tok=orgSess();
+  if(!tok){showLogin();return}
+  api('POST','/api/auth/check',{token:tok}).then(function(r){
+    if(!document.body.contains(area))return;
+    if(r.ok&&r.j&&r.j.ok){renderOrgArea(area);return}
+    orgSetSess('');showLogin();
+  }).catch(function(){
+    if(document.body.contains(area))area.innerHTML='<span class="mut">No connection. Tap Organiser again to retry.</span>';
+  });
+}
+function renderOrgArea(area){
+  var seen={},items=[];
+  tList().forEach(function(t){if(t&&t.id&&!seen[t.id]){seen[t.id]=1;items.push({id:t.id,name:t.name,own:true,regKey:t.regKey||'',key:t.key||''})}});
+  knownTs().forEach(function(t){if(t&&t.id&&!seen[t.id]){seen[t.id]=1;items.push({id:t.id,name:t.name})}});
+  var h='<div style="display:flex;justify-content:space-between;align-items:center"><span class="mut">Signed in as <b>denny</b></span><button class="btn sec small" id="ogout">Sign out</button></div>';
+  h+='<b style="display:block;margin-top:14px">All links in one spot</b><span class="mut">Tap Open to go straight there, or Copy to send it.</span><div id="lkhome">';
+  items.forEach(function(t){
+    h+='<div class="lkgrp" id="lkg-'+esc(t.id)+'">'+esc(t.name)+'</div>';
+    h+=lkRow('Live scores & calendar','/t/'+t.id,{share:true});
+    if(t.own&&t.regKey)h+=lkRow('Captain team entry','/r/'+t.id+'#r='+t.regKey,{share:true});
+    if(t.own)h+=lkRow('Organiser controls (keep private)','/t/'+t.id+'#o='+t.key,{noOpen:true});
+  });
+  h+='<div class="lkgrp">Everyone</div>'+lkRow('Grand opening ceremony','/launch',{share:true});
+  h+='</div>';
+  h+=matchCard()+tourInner();
+  area.innerHTML=h;
+  wireMatch();wireTour();wirePick();refreshNames();
+  document.getElementById('ogout').onclick=function(){var tok=orgSess();orgSetSess('');if(tok)api('POST','/api/auth/logout',{token:tok}).catch(function(){});renderOrg()};
 }
 function viewPane(){
   var h='<b>Watching the scores?</b><span class="mut" id="vlead"></span><div id="vgrps">';
@@ -690,7 +753,7 @@ function wireRole(){
   function set(k){pane.innerHTML=P[k];
     var bs=t.querySelectorAll('button');for(var i=0;i<bs.length;i++)bs[i].classList.toggle('on',bs[i].getAttribute('data-r')===k);
     var gs=pane.querySelectorAll('[data-go]');for(var j=0;j<gs.length;j++)(function(g){g.onclick=function(){var el=document.getElementById(g.getAttribute('data-go'));if(el){el.scrollIntoView({behavior:'smooth',block:'center'});el.focus()}}})(gs[j]);
-    if(k==='view')fillViewerScores();
+    if(k==='view')fillViewerScores();if(k==='org')renderOrg();
   }
   var bs=t.querySelectorAll('button');for(var i=0;i<bs.length;i++)(function(b){b.onclick=function(){set(b.getAttribute('data-r'))}})(bs[i]);
   set('view');
@@ -719,22 +782,31 @@ function homeLinksCard(){
 }
 function home(){
   var qt=(location.search.match(/[?&]t=([a-z0-9]+)/)||[])[1]||'';
+  window.homeQT=qt;
   app.innerHTML='<div class="top"><b class="brand"><i class="mark"></i>KCL (KPD Cricket League)</b><span></span></div>'+
-  '<div class="hero"><h2>Live cricket scoring</h2><p>Score ball by ball. Share one link for live scores.</p></div>'+homeLinksCard()+roleGuide()+
-  '<div class="card" style="margin-top:14px"><label>Match title</label><input id="title" placeholder="e.g. Match 1" maxlength="50">'+
-  '<div class="two"><div><label>Match date</label><input id="date" type="date" value="'+todayStr()+'"></div><div><label>Tournament</label><select id="tsel"><option value="">None</option>'+tList().map(function(t){return '<option value="'+esc(t.id)+'"'+(qt===t.id?' selected':'')+'>'+esc(t.name)+'</option>'}).join('')+'</select></div></div>'+
+  '<div class="hero"><h2>Live cricket scoring</h2><p>Score ball by ball. Share one link for live scores.</p></div>'+roleGuide()+linkCard()+appCard()+FOOT;
+  wireApp();wireLink();wireRole();
+  if(qt){var ob=document.querySelector('#rtabs button[data-r="org"]');if(ob)ob.click()}
+}
+function matchCard(){
+  var qt=window.homeQT||'',l=tList(),sid=qt||(l.length===1?l[0].id:'');
+  return '<div style="margin-top:18px;border-top:1px solid #e3d294;padding-top:12px"><b>Create a match</b>'+
+  '<label>Match title</label><input id="title" placeholder="e.g. Match 1" maxlength="50">'+
+  '<div class="two"><div><label>Match date</label><input id="date" type="date" value="'+todayStr()+'"></div><div><label>Tournament</label><select id="tsel"><option value="">None</option>'+l.map(function(t){return '<option value="'+esc(t.id)+'"'+(sid===t.id?' selected':'')+'>'+esc(t.name)+'</option>'}).join('')+'</select></div></div>'+
   '<div class="two"><div><label>Overs per innings (max 10)</label><select id="overs">'+[1,2,3,4,5,6,7,8,9,10].map(function(n){return '<option'+(n===6?' selected':'')+'>'+n+'</option>'}).join('')+'</select></div>'+
   '<div><label>Batting first</label><select id="first"><option value="0">Team 1</option><option value="1">Team 2</option></select></div></div>'+
   '<div class="two"><div><label>Team 1: pick a registered team</label><select id="pick0"><option value="">Type names below instead</option></select></div><div><label>Team 2: pick a registered team</label><select id="pick1"><option value="">Type names below instead</option></select></div></div>'+
   '<div class="two"><div><label>Team 1 name</label><input id="t0" placeholder="Team 1" maxlength="24"></div><div><label>Team 2 name</label><input id="t1" placeholder="Team 2" maxlength="24"></div></div>'+
   '<div class="two"><div><label>Team 1 players (one per line)</label><textarea id="p0" placeholder="One name per line"></textarea></div><div><label>Team 2 players (one per line)</label><textarea id="p1" placeholder="One name per line"></textarea></div></div>'+
   '<div class="mut" style="margin-top:6px">2 to 15 players per team.</div>'+
-  '<h1>Rules</h1><div class="two"><div><label>Wide penalty runs</label><select id="wd"><option>1</option><option>0</option><option>2</option></select></div><div><label>No-ball penalty runs</label><select id="nb"><option>1</option><option>0</option><option>2</option></select></div></div>'+
+  '<b style="display:block;margin-top:10px">Rules</b><div class="two"><div><label>Wide penalty runs</label><select id="wd"><option>1</option><option>0</option><option>2</option></select></div><div><label>No-ball penalty runs</label><select id="nb"><option>1</option><option>0</option><option>2</option></select></div></div>'+
   '<label>Max overs per bowler</label><select id="mob"><option value="0">No limit</option>'+[1,2,3,4,5].map(function(n){return '<option>'+n+'</option>'}).join('')+'</select>'+
-    '<div class="mut">All out = players minus one wickets. Ties are shown as ties (no super over).</div>'+
-  '<button class="btn pri" id="go" style="margin-top:16px">Create match</button></div>'+tourCard()+linkCard()+appCard()+FOOT;
-  wireTour();refreshNames();wireApp();wireLink();wirePick();wireRole();
-  document.getElementById('go').onclick=function(){
+  '<div class="mut">All out = players minus one wickets. Ties are shown as ties (no super over).</div>'+
+  '<button class="btn pri" id="go" style="margin-top:16px">Create match</button></div>';
+}
+function wireMatch(){
+  var g=document.getElementById('go');if(!g)return;
+  g.onclick=function(){
     var b=this;b.disabled=true;
     var lines=function(s){return document.getElementById(s).value.split('\n').map(function(x){return x.trim()}).filter(Boolean)};
     var ts=tList().filter(function(t){return t.id===v('tsel')})[0];
@@ -745,6 +817,13 @@ function home(){
       showCreated(r.j);
     }).catch(function(){b.disabled=false;toast('No connection. Try again.')});
   };
+}
+function tourInner(){
+  var l=tList(),h='<div style="margin-top:18px;border-top:1px solid #e3d294;padding-top:12px"><b>Tournament calendars</b><div class="mut">Group matches by date so anyone with the calendar link can look back at past scores.</div>';
+  l.forEach(function(t){h+='<div class="trow"><b class="fire">'+esc(t.name)+'</b><span><a href="/t/'+esc(t.id)+'">Calendar</a></span></div>'});
+  vList().filter(function(x){return !l.some(function(o){return o.id===x.id})}).forEach(function(t){h+='<div class="trow"><b class="fire">'+esc(t.name)+'</b><span><a href="/t/'+esc(t.id)+'">Calendar</a> <small class="mut">view only</small></span></div>'});
+  h+='<label>New tournament name</label><input id="tname" maxlength="40" placeholder="Tournament name"><button class="btn sec" id="tgo" style="margin-top:10px">Create tournament calendar</button></div>';
+  return h;
 }
 function v(i){return document.getElementById(i).value}
 function tourCard(){
