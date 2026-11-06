@@ -351,15 +351,18 @@ function confetti(ms){
 function launchPage(){
   document.title='KCL (KPD Cricket League) - Grand Opening';
   var reduced=window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  app.innerHTML='<div class="lnov"><div class="lntro">'+
+  app.innerHTML='';
+  var ov=document.createElement('div');
+  ov.className='lnov';
+  ov.innerHTML='<div class="lntro">'+
   '<div class="lnlogo lnglow">🏏</div>'+
   '<h2 class="fire" style="font-size:44px;margin:0">KCL</h2>'+
   '<div style="font-weight:900;color:#4a1d96;font-size:19px;margin-top:4px;letter-spacing:.4px">KPD Cricket League</div>'+
   '<div class="mut" style="margin-top:14px;font-size:14.5px">Grand Opening Ceremony</div>'+
   '<button class="btn pri lnstart" id="lngo">Tap to Start</button>'+
-  '<div class="foot" style="margin-top:30px">Developed by <b>Anthony Dennis</b></div></div></div>';
+  '<div class="foot" style="margin-top:30px">Developed by <b>Anthony Dennis</b></div></div>';
+  document.body.appendChild(ov);
   document.getElementById('lngo').onclick=function(){
-    var ov=document.querySelector('.lnov');
     ov.innerHTML='<div class="lntro">'+
     '<div style="position:relative;width:130px;margin:0 auto 16px"><div class="lnring" style="inset:-10px"></div><div class="lnring" style="inset:-10px;animation-delay:.45s"></div><div class="lnlogo lnpop lnglow" style="margin:0">🏆</div></div>'+
     '<h2 class="fire lnpop" style="font-size:52px;margin:4px 0 0;animation-delay:.18s">KCL</h2>'+
