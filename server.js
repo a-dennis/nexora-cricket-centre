@@ -175,9 +175,20 @@ function cleanStoredTeams(list) {
   }
   return out;
 }
-function summary(m) {
+// Public employee fields are authorised only for this tournament's approved teams.
+const PUBLIC_DETAIL_TOURNAMENT = 'whxrz4tw';
+function registeredTeamRefs(m, t) {
+  if (!t || t.id !== PUBLIC_DETAIL_TOURNAMENT || m.config.tid !== t.id) return [null, null];
+  const approved = cleanStoredTeams(t.teams).filter(x => x.status === 'approved');
+  return m.config.teams.map(team => {
+    const same = approved.filter(x => x.name === team.name && JSON.stringify(x.players.map(p => p.name)) === JSON.stringify(team.players));
+    const found = team.registrationId ? same.find(x => x.id === team.registrationId) : (same.length === 1 ? same[0] : null);
+    return found ? {id: found.id, tournamentId: t.id} : null;
+  });
+}
+function summary(m, tournament) {
   const st = engine.view(m.config, m.events);
-  return { id: m.id, title: m.config.title, date: m.config.date || null, teams: m.config.teams.map((t) => t.name),
+  return { id: m.id, title: m.config.title, date: m.config.date || null, teams: m.config.teams.map((t) => t.name), teamRefs: registeredTeamRefs(m, tournament),
     innings: st.innings.filter((i) => i.balls > 0).map((i) => ({ team: i.batName, runs: i.runs, wkts: i.wkts, overs: i.overs })),
     result: st.result ? st.result.text : null, status: m.events.length === 0 ? 'new' : (st.result ? 'done' : 'live') };
 }
@@ -322,6 +333,12 @@ async function handle(req, res) {
     const ms = await store.byTournament(t.id);
     return send(res, 200, { format: 'cricket-backup', version: 1, exportedAt: new Date().toISOString(), storage: store.kind, counts: { matches: ms.length, tournaments: 1 }, tournaments: [{ id: t.id, name: t.name, keyHash: t.keyHash, teams: cleanStoredTeams(t.teams), regKeyHash: t.regKeyHash || null }], matches: ms.map((m) => ({ id: m.id, config: m.config, events: m.events, keyHash: m.keyHash, rev: m.rev, updated: m.updated })) });
   }
+  if ((mt = p.match(/^\/api\/tournaments\/([a-z0-9]{6,12})\/team-details$/)) && req.method === 'GET') {
+    if (mt[1] !== PUBLIC_DETAIL_TOURNAMENT) return send(res, 404, {error:'Team details are not public for this tournament.'});
+    const t = await store.tget(mt[1]);
+    if (!t) return send(res, 404, {error:'Tournament not found'});
+    return send(res, 200, {id:t.id,name:t.name,teams:cleanStoredTeams(t.teams).filter(x=>x.status==='approved').map(x=>({id:x.id,name:x.name,players:x.players.map(p=>({name:p.name,empId:p.empId||'',dept:p.dept||''}))}))});
+  }
   if (p === '/api/tournaments/listed' && req.method === 'GET') {
     return send(res, 200, { tournaments: await store.listedTournaments() });
   }
@@ -330,7 +347,7 @@ async function handle(req, res) {
     if (!t) return send(res, 404, { error: 'Tournament not found' });
     const ms = await store.byTournament(t.id);
     const teams = cleanStoredTeams(t.teams);
-    const resp = { id: t.id, name: t.name, listed: !!t.listed, matches: ms.map(summary),
+    const resp = { id: t.id, name: t.name, listed: !!t.listed, matches: ms.map(m => summary(m, t)),
       teams: teams.filter((x) => x.status === 'approved').map((x) => ({ id: x.id, name: x.name, players: x.players.map((p) => p.name + (p.role === 'c' ? ' (C)' : p.role === 'vc' ? ' (VC)' : '')) })) };
     const orgKey = req.headers['x-org-key'];
     if (orgKey) {
@@ -446,6 +463,8 @@ async function handle(req, res) {
       if (!keyEq(req.headers['x-org-key'], t.keyHash)) return send(res, 403, { error: 'Only the tournament organiser can add matches.' });
       if ((await store.byTournament(t.id)).length >= MAX_PER_TOURNAMENT) return send(res, 507, { error: 'Tournament is full.' });
       config.tid = t.id;
+      const approved = cleanStoredTeams(t.teams).filter(x=>x.status==='approved');
+      config.teams.forEach((team,i)=>{const rid=body.teams[i]&&body.teams[i].registrationId;const found=approved.find(x=>x.id===rid&&x.name===team.name&&JSON.stringify(x.players.map(p=>p.name))===JSON.stringify(team.players));if(found)team.registrationId=found.id;});
     }
     const id = rnd(8).toLowerCase(), key = rnd(14);
     await store.create({ id, config, keyHash: sha(key) });
@@ -455,7 +474,7 @@ async function handle(req, res) {
     const m = await store.get(mt[1]);
     if (!m) return send(res, 404, { error: 'Match not found' });
     if (url.searchParams.get('rev') === String(m.rev)) return send(res, 200, { unchanged: true, rev: m.rev });
-    return send(res, 200, publicView(m));
+    const view = publicView(m); view.teamRefs = registeredTeamRefs(m, m.config.tid ? await store.tget(m.config.tid) : null); return send(res, 200, view);
   }
   if ((mt = p.match(/^\/api\/matches\/([a-z0-9]{6,12})\/(event|undo)$/)) && req.method === 'POST') {
     const m = await store.get(mt[1]);
