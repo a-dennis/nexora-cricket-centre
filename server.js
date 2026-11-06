@@ -559,6 +559,7 @@ async function handle(req, res) {
   }
   if (p.startsWith('/api/')) return send(res, 404, { error: 'Unknown API' });
   if (req.method !== 'GET' && req.method !== 'HEAD') { res.writeHead(405); return res.end(); }
+  if(p==='/camera')return serveStatic(res,'camera.html');
   if (p === '/' || p === '/launch' || /^\/(m|s|t|r)\/[a-z0-9]+\/?$/.test(p)) return serveStatic(res, 'index.html');
   return serveStatic(res, p.slice(1));
 }
