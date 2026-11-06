@@ -295,6 +295,11 @@ html:not(.pd) .wrap>.card{max-width:780px;margin-left:auto;margin-right:auto}
 html:not(.pd) .wrap>.hero:not(.wide){max-width:780px;margin-left:auto;margin-right:auto}
 html:not(.pd) .sheet{align-items:center}html:not(.pd) .sheet>div{border-radius:24px;max-width:560px}
 }
+#publicnjplayer.portrait{padding-top:0;height:min(142vw,75vh)}
+#publicnjstage.expanded,#publicnjstage:fullscreen{position:fixed;inset:0;z-index:1000;background:#0b1020;padding:10px;display:flex;flex-direction:column;justify-content:center;gap:8px}
+#publicnjstage.expanded #publicnjplayer,#publicnjstage:fullscreen #publicnjplayer{padding-top:0;height:auto;flex:1;min-height:0;display:block!important;border-radius:0}
+#publicnjstage.expanded .njcontrols,#publicnjstage:fullscreen .njcontrols{flex:none}
+.njcontrols{display:flex;gap:8px;margin-top:8px}.njcontrols button{flex:1;font-size:13px}
 </style></head><body>
 <div class="wrap" id="app"></div>
 <script>
@@ -1116,18 +1121,24 @@ function ytId(u){
 var publicVideoOpen='';
 function videoCardView(){
   var n=S&&S.config&&ninjaViewUrl(S.config.ninjaView);
-  if(n)return '<h1>Live camera</h1><div class="card" style="padding:10px"><div id="publicnjplayer" class="vidwrap"'+(publicVideoOpen===n?'':' style="display:none"')+'></div><button class="btn pri" id="publicnjstart"'+(publicVideoOpen===n?' style="display:none"':'')+'>Watch live camera</button><button class="btn sec" id="publicnjstop"'+(publicVideoOpen===n?'':' style="display:none"')+'>Stop watching</button><div class="sub" style="margin-top:8px">VDO.Ninja camera. Tap Play if asked. Loading is not proof the camera is connected. Video and score may not be in sync.</div></div>';
+  if(n)return '<h1>Live camera</h1><div class="card" style="padding:10px"><div id="publicnjstage"><div id="publicnjplayer" class="vidwrap"'+(publicVideoOpen===n?'':' style="display:none"')+'></div><div class="njcontrols" id="publicnjtools"'+(publicVideoOpen===n?'':' style="display:none"')+'><button class="btn sec" id="publicnjfull">Full screen</button><button class="btn sec" id="publicnjshape" aria-pressed="false">Portrait picture</button><button class="btn sec" id="publicnjstop">Stop watching</button></div></div><button class="btn pri" id="publicnjstart"'+(publicVideoOpen===n?' style="display:none"':'')+'>Watch live camera</button><div class="sub" style="margin-top:8px">For a wide cricket picture, hold the camera phone sideways. Full screen enlarges without cropping or stretching. Use Portrait picture for an upright camera. Video and score may not be in sync.</div></div>';
+
   var v=S&&S.config&&S.config.videoId;
   if(!v||!/^[A-Za-z0-9_-]{11}$/.test(v))return'';
   return '<h1>Live video</h1><div class="card" style="padding:10px 10px 12px"><div class="vidwrap"><iframe src="https://www.youtube.com/embed/'+v+'" allow="accelerometer; autoplay; encrypted-media; picture-in-picture" allowfullscreen title="Live video"></iframe></div><div class="sub" style="margin-top:8px">Video may run a little behind the score · <a href="https://www.youtube.com/watch?v='+v+'" target="_blank" rel="noopener">Watch on YouTube</a></div></div>';
 }
 function wirePublicNinja(kept){
-  var slot=document.getElementById('publicnjplayer'),start=document.getElementById('publicnjstart'),stop=document.getElementById('publicnjstop');
+  var slot=document.getElementById('publicnjplayer'),start=document.getElementById('publicnjstart'),stop=document.getElementById('publicnjstop'),stage=document.getElementById('publicnjstage'),tools=document.getElementById('publicnjtools'),full=document.getElementById('publicnjfull'),shape=document.getElementById('publicnjshape');
   if(!slot)return;
-  var n=ninjaViewUrl(S.config.ninjaView);if(kept&&publicVideoOpen===n)slot.appendChild(kept);else if(publicVideoOpen===n)publicVideoOpen='';
-  start.onclick=function(){publicVideoOpen=n;var f=document.createElement('iframe');f.src=n;f.title='Public live match camera';f.allow='autoplay; fullscreen';f.referrerPolicy='no-referrer';f.allowFullscreen=true;slot.replaceChildren(f);slot.style.display='';start.style.display='none';stop.style.display=''};
-  stop.onclick=function(){publicVideoOpen='';slot.replaceChildren();slot.style.display='none';start.style.display='';stop.style.display='none'};
+  var n=ninjaViewUrl(S.config.ninjaView);
+  function exit(){stage.classList.remove('expanded');full.textContent='Full screen';if(document.fullscreenElement===stage&&document.exitFullscreen)document.exitFullscreen().catch(function(){})}
+  start.onclick=function(){publicVideoOpen=n;var f=document.createElement('iframe');f.src=n;f.title='Public live match camera';f.allow='autoplay; fullscreen';f.referrerPolicy='no-referrer';f.allowFullscreen=true;slot.replaceChildren(f);slot.style.display='';start.style.display='none';tools.style.display='flex'};
+  stop.onclick=function(){exit();publicVideoOpen='';slot.replaceChildren();slot.style.display='none';start.style.display='';tools.style.display='none'};
+  shape.onclick=function(){var on=slot.classList.toggle('portrait');shape.textContent=on?'Landscape picture':'Portrait picture';shape.setAttribute('aria-pressed',String(on))};
+  full.onclick=function(){if(stage.classList.contains('expanded')||document.fullscreenElement===stage){exit();return}stage.classList.add('expanded');full.textContent='Exit full screen';if(stage.requestFullscreen){try{var p=stage.requestFullscreen();if(p&&p.catch)p.catch(function(){})}catch(e){}}};
+  document.addEventListener('fullscreenchange',function(){if(!document.fullscreenElement&&stage.isConnected){stage.classList.remove('expanded');full.textContent='Full screen'}});
 }
+
 function liveTab(){
   var st=S.state,i=cur(),h=(ninjaViewUrl(S.config.ninjaView)?'':videoCardView())+scoreCard();
   if(!st.result){
