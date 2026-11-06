@@ -740,6 +740,19 @@ function renderT(){
   var by={};T.matches.forEach(function(m){if(m.date)(by[m.date]=by[m.date]||[]).push(m)});
   var p=ym.split('-'),y=+p[0],mo=+p[1]-1,first=new Date(y,mo,1).getDay(),dim=new Date(y,mo+1,0).getDate(),today=todayStr();
   var h='<div class="top"><b class="brand"><i class="mark"></i>KCL (KPD Cricket League)</b><span></span></div><div class="hero wide"><h2 class="fire">'+esc(T.name)+'</h2><p>Pick a date to see its match scores.</p></div>';
+  h+='<h1>All links in one spot</h1><div class="card"><div class="mut">Share freely with everyone:</div><div class="grid" style="grid-template-columns:1fr 1fr;margin-top:8px"><button class="btn sec" id="lkcal">Copy calendar &amp; live scores</button><button class="btn sec" id="lkshr">Share</button></div><div style="margin-top:10px"><a href="/launch">\u2728 Grand opening ceremony</a> &middot; <a href="/">App home</a></div>';
+  var ownL=tList().filter(function(t){return t.id===id})[0];
+  if(ownL){
+    h+='<div class="mut" style="margin-top:14px">Only you see these (organiser device):</div>';
+    if(T.registration==='open'&&ownL.regKey)h+='<button class="btn sec" id="lkreg" style="margin-top:8px">Copy captain registration link</button>';
+    else if(T.registration==='open')h+='<div class="mut" style="margin-top:8px;font-size:12.5px">Captain registration is open, but its link is saved on the device that created it. You can make a new one under Team registrations below.</div>';
+    else h+='<div class="mut" style="margin-top:8px;font-size:12.5px">Captain registration link not created yet - make one under Team registrations below.</div>';
+    var sks=(T.matches||[]).map(function(m){var k=null;try{k=localStorage.getItem('ck_'+m.id)}catch(e){}return k?{id:m.id,title:m.title}:null}).filter(Boolean);
+    if(sks.length)h+=sks.map(function(s){return '<button class="btn sec" data-lks="'+esc(s.id)+'" style="margin-top:8px">Copy scorer link - '+esc(s.title)+'</button>'}).join('');
+    else h+='<div class="mut" style="margin-top:8px;font-size:12.5px">Scorer links are saved on the device that created each match - a new match shows its scorer link once, at creation.</div>';
+    h+='<button class="btn sec" id="lkorg" style="margin-top:8px">Copy private organiser link</button><div class="mut" style="font-size:12.5px;margin-top:6px">Keep the organiser and scorer links private - anyone with them can control the tournament. The registration link is the one to send captains.</div>';
+  }
+  h+='</div>';
   h+='<div class="tcal"><div class="tl"><div class="card"><div class="row" style="margin-bottom:10px"><button class="nav" id="pm" aria-label="Previous month">‹</button><b style="font-size:17px">'+MON[mo]+' '+y+'</b><button class="nav" id="nm" aria-label="Next month">›</button></div><div class="cal">';
   ['S','M','T','W','T','F','S'].forEach(function(d){h+='<div class="dow">'+d+'</div>'});
   for(var i=0;i<first;i++)h+='<div></div>';
@@ -768,6 +781,11 @@ function renderT(){
   var cu2=location.origin+'/t/'+id,ctc=document.getElementById('ctc'),cts=document.getElementById('cts');
   if(ctc)ctc.onclick=function(){copyTxt(cu2)};
   if(cts)cts.onclick=function(){if(navigator.share)navigator.share({title:T.name,url:cu2}).catch(function(){});else copyTxt(cu2)};
+  var lkcal=document.getElementById('lkcal');if(lkcal)lkcal.onclick=function(){copyTxt(cu2)};
+  var lkshr=document.getElementById('lkshr');if(lkshr)lkshr.onclick=function(){if(navigator.share)navigator.share({title:T.name,url:cu2}).catch(function(){});else copyTxt(cu2)};
+  var lkreg=document.getElementById('lkreg');if(lkreg&&own&&own.regKey)lkreg.onclick=function(){copyTxt(location.origin+'/r/'+id+'#r='+own.regKey)};
+  var lkorg=document.getElementById('lkorg');if(lkorg&&own)lkorg.onclick=function(){copyTxt(location.origin+'/t/'+id+'#o='+own.key)};
+  Array.prototype.forEach.call(document.querySelectorAll('[data-lks]'),function(b){b.onclick=function(){var kk=null;try{kk=localStorage.getItem('ck_'+b.getAttribute('data-lks'))}catch(e){}if(kk)copyTxt(location.origin+'/m/'+b.getAttribute('data-lks')+'#k='+kk);else toast('That scorer link is not saved on this device')}});
   Array.prototype.forEach.call(document.querySelectorAll('.day'),function(b){b.onclick=function(){selDay=selDay===b.dataset.d?null:b.dataset.d;renderT()}});
   var a=document.getElementById('addm');if(a)a.onclick=function(){location.href='/?t='+id};
   var tg=document.getElementById('tgl');if(tg&&own)tg.onclick=function(){tg.disabled=true;api('POST','/api/tournaments/'+id+'/listed',{listed:!T.listed},own.key).then(function(r){tg.disabled=false;if(!r.ok){toast(r.j.error||'Could not update');return}T.listed=!T.listed;toast(T.listed?'Now showing on the home Viewer tab':'Hidden from the home Viewer tab',1);renderT()}).catch(function(){tg.disabled=false;toast('No connection. Try again.')})};
