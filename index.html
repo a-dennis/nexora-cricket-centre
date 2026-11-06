@@ -195,6 +195,7 @@ label{color:#6d6791}
 .lkname{font-weight:600;font-size:14.5px}
 .lkbtns{display:flex;gap:6px;flex-shrink:0}
 .lkbtns .btn{padding:7px 12px;font-size:13px;margin-top:0;width:auto}
+.lnmute{position:fixed;top:14px;right:14px;z-index:95;width:44px;height:44px;border-radius:50%;border:1px solid rgba(160,120,40,.4);background:rgba(255,252,244,.9);font-size:19px;cursor:pointer;box-shadow:0 4px 14px rgba(120,80,20,.18)}
 .lkgrp{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:#8a6d1f;margin:14px 0 2px;font-weight:700}
 
 .rlbtn.sm{padding:2px 8px;font-size:10.5px;align-self:center}
@@ -418,6 +419,45 @@ function confetti(ms){
     if(el<ms)requestAnimationFrame(fr);else cv.remove();
   })();
 }
+function fanfare(){
+  var AC=window.AudioContext||window.webkitAudioContext;if(!AC)return null;
+  var ac=new AC(),master=ac.createGain();master.gain.value=.5;master.connect(ac.destination);
+  var t0=ac.currentTime+.05;
+  function tone(f,t,dur,type,vol,glide){
+    var o=ac.createOscillator(),g=ac.createGain();o.type=type||'sine';o.frequency.setValueAtTime(f,t);
+    if(glide)o.frequency.exponentialRampToValueAtTime(glide,t+dur);
+    g.gain.setValueAtTime(0,t);g.gain.linearRampToValueAtTime(vol,t+.03);g.gain.exponentialRampToValueAtTime(.001,t+dur);
+    o.connect(g);g.connect(master);o.start(t);o.stop(t+dur+.05);
+  }
+  function drum(t,vol){
+    var o=ac.createOscillator(),g=ac.createGain();o.type='sine';o.frequency.setValueAtTime(150,t);o.frequency.exponentialRampToValueAtTime(45,t+.18);
+    g.gain.setValueAtTime(vol,t);g.gain.exponentialRampToValueAtTime(.001,t+.22);
+    o.connect(g);g.connect(master);o.start(t);o.stop(t+.25);
+  }
+  function shimmer(t,dur,vol){
+    var len=Math.floor(ac.sampleRate*dur),buf=ac.createBuffer(1,len,ac.sampleRate),d=buf.getChannelData(0);
+    for(var i=0;i<len;i++)d[i]=(Math.random()*2-1)*(1-i/len);
+    var n=ac.createBufferSource();n.buffer=buf;var f=ac.createBiquadFilter();f.type='highpass';f.frequency.value=6000;
+    var g=ac.createGain();g.gain.value=vol;n.connect(f);f.connect(g);g.connect(master);n.start(t);
+  }
+  // 0-2s build: rising arpeggio over soft pulses
+  var notes=[261.6,329.6,392,523.3];
+  for(var k=0;k<8;k++){var t=t0+k*.24;tone(notes[k%4]*(k>3?2:1),t,.5,'triangle',.10);if(k%2===0)drum(t,.20)}
+  // 1.9-3.5s spin: rolling tom pulses + sparkle
+  for(var k2=0;k2<6;k2++){drum(t0+1.9+k2*.26,.16);shimmer(t0+1.9+k2*.26,.18,.05)}
+  // 3.7s zoom flourish: rising run + swell
+  var run=[392,440,523.3,587.3,659.3,784,880,1046.5];
+  run.forEach(function(f,ix){tone(f,t0+3.7+ix*.11,.45,'sawtooth',.05);tone(f,t0+3.7+ix*.11,.45,'triangle',.10)});
+  tone(130.8,t0+3.7,2.2,'sine',.22,261.6);shimmer(t0+3.9,1.6,.12);
+  drum(t0+5.9,.3);
+  // 6.2s headline: warm resolve chord (C-E-G-D) with tail
+  [261.6,329.6,392,587.3].forEach(function(f){tone(f,t0+6.2,2.8,'triangle',.13);tone(f/2,t0+6.2,2.8,'sine',.09)});
+  tone(1046.5,t0+6.35,2.4,'sine',.07);shimmer(t0+6.2,1.2,.08);
+  var endT=(t0+9.6-ac.currentTime)*1000;
+  var h={muted:false,timer:setTimeout(function(){try{ac.close()}catch(e){}},Math.max(0,endT))};
+  h.toggle=function(){h.muted=!h.muted;master.gain.value=h.muted?0:.5;return h.muted};
+  return h;
+}
 function launchPage(){
   document.title='KCL (KPD Cricket League) - Grand Opening';
   var reduced=window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -435,6 +475,7 @@ function launchPage(){
   '<div class="foot" style="margin-top:30px">Developed by <b>Anthony Dennis</b></div></div>';
   document.body.appendChild(ov);
   document.getElementById('lngo').onclick=function(){
+    var mus=fanfare();
     ov.innerHTML=aur+spk+'<div class="lnflash"></div><div class="lntro">'+
     '<div style="position:relative;width:150px;margin:0 auto 18px;perspective:900px"><span class="lnstar" style="left:-26px;top:-12px;animation-delay:.2s">\u2726</span><span class="lnstar" style="right:-24px;top:2px;animation-delay:.9s;font-size:16px">\u2726</span><span class="lnstar" style="left:-14px;bottom:-6px;animation-delay:1.4s;font-size:14px">\u2726</span><span class="lnstar" style="right:-14px;bottom:10px;animation-delay:.55s">\u2726</span><div class="lnsun"></div><div class="lnring" style="inset:-10px"></div><div class="lnring" style="inset:-10px;animation-delay:.45s"></div>'+
 '<div class="lnbig"><div class="lnspinwrap"><div class="lnlogo lnglow lnshine" style="margin:0;width:130px;height:130px"><i class="mark" style="width:100%;height:100%;border-radius:inherit;display:block"></i></div></div></div></div>'+
@@ -443,7 +484,8 @@ function launchPage(){
     '<div class="lndiv"></div>'+
     '<div class="lnpop lnfire" style="font-size:30px;font-weight:900;letter-spacing:1.5px;margin-top:16px;animation-delay:6.2s">THE KCL HAS BEGAN</div>'+
     '<button class="btn pri lnstart lnpop" id="lnenter" style="animation-delay:6.7s">Enter the app</button>'+
-    '<div class="foot" style="margin-top:26px">Developed by <b>Anthony Dennis</b></div></div><div class="lnzoomstage"><i class="lnzoomimg"></i></div>';
+    '<div class="foot" style="margin-top:26px">Developed by <b>Anthony Dennis</b></div></div><div class="lnzoomstage"><i class="lnzoomimg"></i></div><button class="lnmute" id="lnmute" aria-label="Mute music">\ud83d\udd0a</button>';
+    var mb=document.getElementById('lnmute');if(mb)mb.onclick=function(){if(mus)mb.textContent=mus.toggle()?'\ud83d\udd07':'\ud83d\udd0a'};
     if(!reduced)confetti(7000);
     document.getElementById('lnenter').onclick=function(){location.href='/'};
   };
