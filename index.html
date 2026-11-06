@@ -205,17 +205,37 @@ a{color:#0b6b9a}
 button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline-color:#7a3cff}
 /* grand opening ceremony */
 .lnov{position:fixed;inset:0;z-index:60;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:24px;overflow:hidden;background:radial-gradient(620px 500px at 50% -10%,#ffe9a6,transparent),radial-gradient(520px 520px at 108% 90%,#ffc7dd88,transparent),radial-gradient(520px 520px at -8% 95%,#c9a7ff66,transparent),#fff8e6}
+.lnaur{position:absolute;width:140vmax;height:140vmax;left:50%;top:50%;margin:-70vmax;border-radius:50%;filter:blur(60px);opacity:.5;pointer-events:none}
+.lnaur.a1{background:radial-gradient(circle at 30% 30%,#ffd45c88,transparent 60%);animation:lndrift 14s ease-in-out infinite alternate}
+.lnaur.a2{background:radial-gradient(circle at 70% 60%,#ff5c8a55,transparent 60%);animation:lndrift 18s ease-in-out infinite alternate-reverse}
 .lntro{animation:lnfade .8s ease both;position:relative;z-index:2;width:100%;max-width:430px}
-.lnlogo{width:112px;height:112px;border-radius:30px;background:linear-gradient(135deg,#ffb300,#ff5c8a 60%,#7a3cff);box-shadow:0 18px 44px #ff9f1c66;display:flex;align-items:center;justify-content:center;margin:0 auto 18px;font-size:60px}
-.lnstart{margin:28px auto 0;max-width:300px}
+.lnlogo{width:112px;height:112px;border-radius:30px;background:linear-gradient(135deg,#ffb300,#ff5c8a 60%,#7a3cff);box-shadow:0 18px 44px #ff9f1c66;display:flex;align-items:center;justify-content:center;margin:0 auto 18px;font-size:60px;position:relative;overflow:hidden}
+.lnlogo .mark{position:relative;z-index:1}
+.lnshine:after{content:"";position:absolute;top:-30%;left:-80%;width:55%;height:160%;background:linear-gradient(105deg,transparent,#ffffffb8,transparent);transform:skewX(-18deg);animation:lnshine 2.8s ease-in-out infinite;z-index:2;pointer-events:none}
+.lnfloat{animation:lnfloat 3.2s ease-in-out infinite}
+.lnstart{margin:28px auto 0;max-width:300px;animation:lnbtnpulse 1.8s ease-in-out infinite}
 .lnpop{animation:lnpop .7s cubic-bezier(.2,1.4,.4,1) both}
+.lnbig{animation:lnbig .9s cubic-bezier(.2,1.5,.3,1) both}
 .lnglow{animation:lnglow 1.6s ease-in-out infinite alternate}
 .lnring{position:absolute;border:3px solid #ffb300;border-radius:50%;opacity:0;animation:lnring 1.4s ease-out infinite;pointer-events:none}
-canvas.lnfx{position:fixed;inset:0;z-index:61;pointer-events:none}
+.lnsun{position:absolute;inset:-70px;border-radius:50%;background:repeating-conic-gradient(from 0deg,#ffb30038 0deg 7deg,transparent 7deg 15deg);animation:lnsunrot 14s linear infinite;pointer-events:none;-webkit-mask-image:radial-gradient(circle,#000 0 62%,transparent 71%);mask-image:radial-gradient(circle,#000 0 62%,transparent 71%)}
+.lnfire{font-size:52px;margin:4px 0 0;background:linear-gradient(90deg,#c2185b,#e8590c 30%,#ffd45c 50%,#e8590c 70%,#c2185b);background-size:220% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;-webkit-text-fill-color:transparent;animation:lnshimmer 3s linear infinite}
+.lnletter{display:inline-block;animation:lnbig .8s cubic-bezier(.2,1.5,.3,1) both}
+.lndiv{height:3px;width:0;margin:14px auto 0;border-radius:2px;background:linear-gradient(90deg,transparent,#ffb300,#ff5c8a,#ffb300,transparent);animation:lndiv .8s ease-out .95s forwards}
+.lnspk{position:absolute;width:7px;height:7px;border-radius:50%;background:#ffd45c;box-shadow:0 0 10px 2px #ffb30088;opacity:0;animation:lnspk 3.4s ease-in-out infinite;pointer-events:none}
+@keyframes lndrift{from{transform:translate(-6%,-4%) scale(1)}to{transform:translate(5%,6%) scale(1.15)}}
 @keyframes lnfade{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
 @keyframes lnpop{0%{transform:scale(.2);opacity:0}70%{transform:scale(1.12)}100%{transform:scale(1);opacity:1}}
+@keyframes lnbig{0%{transform:scale(0) rotate(-14deg);opacity:0}60%{transform:scale(1.25) rotate(4deg);opacity:1}100%{transform:scale(1) rotate(0)}}
 @keyframes lnglow{from{filter:drop-shadow(0 0 6px #ffb00066)}to{filter:drop-shadow(0 0 22px #ff8a00aa)}}
 @keyframes lnring{0%{opacity:.7;transform:scale(.4)}100%{opacity:0;transform:scale(1.9)}}
+@keyframes lnsunrot{to{transform:rotate(360deg)}}
+@keyframes lnshine{0%{left:-80%}55%,100%{left:130%}}
+@keyframes lnfloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-9px)}}
+@keyframes lnshimmer{to{background-position:220% 0}}
+@keyframes lndiv{to{width:240px}}
+@keyframes lnspk{0%,100%{opacity:0;transform:translateY(10px) scale(.5)}50%{opacity:1;transform:translateY(-14px) scale(1)}}
+@keyframes lnbtnpulse{0%,100%{box-shadow:0 10px 26px #ffb30055}50%{box-shadow:0 10px 40px #ff9f1cbb,0 0 0 8px #ffb30022}}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 
 .mark{background-image:url(data:image/jpeg;base64,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);background-size:cover;background-position:center}
@@ -338,13 +358,25 @@ function downloadReport(){
 /* ---------- grand opening ceremony (/launch) ---------- */
 function confetti(ms){
   var cv=document.createElement('canvas');cv.className='lnfx';document.body.appendChild(cv);
-  var ctx=cv.getContext('2d'),W,H;function rs(){var d=window.devicePixelRatio||1;W=cv.width=Math.round(innerWidth*d);H=cv.height=Math.round(innerHeight*d)}rs();addEventListener('resize',rs);
-  var cols=['#ffb300','#ff5c8a','#7a3cff','#0d8bd9','#14c8a0','#ff7a45','#ffd45c'],P=[],d=window.devicePixelRatio||1;
-  for(var i=0;i<170;i++)P.push({x:Math.random()*W,y:-Math.random()*H*.6-30*d,w:(6+Math.random()*7)*d,h:(9+Math.random()*11)*d,c:cols[i%cols.length],vy:(2.2+Math.random()*3.6)*d,vx:(-1.2+Math.random()*2.4)*d,r:Math.random()*Math.PI,vr:(-.12+Math.random()*.24)});
+  var ctx=cv.getContext('2d'),W,H,d=window.devicePixelRatio||1;
+  function rs(){W=cv.width=Math.round(innerWidth*d);H=cv.height=Math.round(innerHeight*d)}rs();addEventListener('resize',rs);
+  var cols=['#ffb300','#ff5c8a','#7a3cff','#0d8bd9','#14c8a0','#ff7a45','#ffd45c'],P=[];
+  function cannon(x,ang){for(var i=0;i<70;i++){var a=ang+(-.5+Math.random())*.9,sp=(9+Math.random()*7)*d;P.push({t:'c',x:x,y:H+10,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp,w:(6+Math.random()*7)*d,h:(9+Math.random()*11)*d,c:cols[(Math.random()*cols.length)|0],r:Math.random()*Math.PI,vr:(-.15+Math.random()*.3),born:Date.now()})}}
+  function fw(){var fx2=W*(.18+Math.random()*.64),fy=H*(.14+Math.random()*.34),c=cols[(Math.random()*cols.length)|0],c2=cols[(Math.random()*cols.length)|0];for(var i=0;i<46;i++){var a=Math.PI*2*i/46,sp=(1.6+Math.random()*3.4)*d;P.push({t:'f',x:fx2,y:fy,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp,c:Math.random()<.5?c:c2,born:Date.now(),life:900+Math.random()*500})}}
+  cannon(0,Math.PI*-.38);cannon(W,Math.PI*-.62);
+  var bursts=setInterval(fw,650);setTimeout(function(){clearInterval(bursts)},2700);
   var t0=Date.now();
   (function fr(){
     var el=Date.now()-t0;ctx.clearRect(0,0,W,H);
-    for(var k=0;k<P.length;k++){var p=P[k];p.x+=p.vx;p.y+=p.vy;p.r+=p.vr;if(p.y>H+30){p.y=-30;p.x=Math.random()*W}ctx.save();ctx.translate(p.x,p.y);ctx.rotate(p.r);ctx.fillStyle=p.c;ctx.globalAlpha=Math.max(0,1-Math.pow(el/ms,2));ctx.fillRect(-p.w/2,-p.h/2,p.w,p.h);ctx.restore()}
+    for(var k=P.length-1;k>=0;k--){var p=P[k],age=Date.now()-p.born;
+      if(p.t==='c'){p.x+=p.vx;p.y+=p.vy;p.vy+=.16*d;p.vx*=.992;p.r+=p.vr;
+        if(p.y>H+40){P.splice(k,1);continue}
+        ctx.save();ctx.translate(p.x,p.y);ctx.rotate(p.r);ctx.fillStyle=p.c;ctx.globalAlpha=Math.max(0,1-Math.pow(el/ms,2));ctx.fillRect(-p.w/2,-p.h/2,p.w,p.h);ctx.restore();
+      }else{p.x+=p.vx;p.y+=p.vy;p.vx*=.965;p.vy*=.965;p.vy+=.05*d;
+        if(age>p.life){P.splice(k,1);continue}
+        ctx.globalAlpha=Math.max(0,1-age/p.life);ctx.fillStyle=p.c;ctx.beginPath();ctx.arc(p.x,p.y,2.6*d,0,7);ctx.fill();
+      }}
+    ctx.globalAlpha=1;
     if(el<ms)requestAnimationFrame(fr);else cv.remove();
   })();
 }
@@ -354,27 +386,29 @@ function launchPage(){
   app.innerHTML='';
   var ov=document.createElement('div');
   ov.className='lnov';
-  ov.innerHTML='<div class="lntro">'+
-  '<div class="lnlogo lnglow"><i class="mark" style="width:100%;height:100%;border-radius:inherit;display:block"></i></div>'+
-  '<h2 class="fire" style="font-size:44px;margin:0">KCL</h2>'+
-  '<div style="font-weight:900;color:#4a1d96;font-size:19px;margin-top:4px;letter-spacing:.4px">KPD Cricket League</div>'+
-  '<div class="mut" style="margin-top:14px;font-size:14.5px">Grand Opening Ceremony</div>'+
+  var spk='';for(var si=0;si<14;si++)spk+='<span class="lnspk" style="left:'+(4+Math.random()*92).toFixed(1)+'%;top:'+(8+Math.random()*84).toFixed(1)+'%;animation-delay:'+(Math.random()*3.4).toFixed(2)+'s"></span>';
+  var aur='<div class="lnaur a1"></div><div class="lnaur a2"></div>';
+  ov.innerHTML=aur+spk+'<div class="lntro">'+
+  '<div class="lnlogo lnglow lnfloat lnshine"><i class="mark" style="width:100%;height:100%;border-radius:inherit;display:block"></i></div>'+
+  '<h2 class="lnfire" style="font-size:46px;margin:0">KCL</h2>'+
+  '<div style="font-weight:900;color:#4a1d96;font-size:19px;margin-top:6px;letter-spacing:2.5px">KPD CRICKET LEAGUE</div>'+
+  '<div class="mut" style="margin-top:14px;font-size:14.5px;letter-spacing:1.2px">GRAND OPENING CEREMONY</div>'+
   '<button class="btn pri lnstart" id="lngo">Tap to Start</button>'+
   '<div class="foot" style="margin-top:30px">Developed by <b>Anthony Dennis</b></div></div>';
   document.body.appendChild(ov);
   document.getElementById('lngo').onclick=function(){
-    ov.innerHTML='<div class="lntro">'+
-    '<div style="position:relative;width:130px;margin:0 auto 16px"><div class="lnring" style="inset:-10px"></div><div class="lnring" style="inset:-10px;animation-delay:.45s"></div><div class="lnlogo lnpop lnglow" style="margin:0"><i class="mark" style="width:100%;height:100%;border-radius:inherit;display:block"></i></div></div>'+
-    '<h2 class="fire lnpop" style="font-size:52px;margin:4px 0 0;animation-delay:.18s">KCL</h2>'+
-    '<div class="lnpop" style="font-weight:900;color:#4a1d96;font-size:20px;animation-delay:.34s;letter-spacing:.4px">KPD Cricket League</div>'+
-    '<div class="lnpop" style="color:#0b6b52;font-weight:800;margin-top:16px;font-size:17px;animation-delay:.6s">The tournament is now open!</div>'+
-    '<button class="btn pri lnstart lnpop" id="lnenter" style="animation-delay:1s">Enter the app</button>'+
-    '<div class="foot" style="margin-top:28px">Developed by <b>Anthony Dennis</b></div></div>';
-    if(!reduced)confetti(3400);
+    ov.innerHTML=aur+spk+'<div class="lntro">'+
+    '<div style="position:relative;width:150px;margin:0 auto 18px"><div class="lnsun"></div><div class="lnring" style="inset:-10px"></div><div class="lnring" style="inset:-10px;animation-delay:.45s"></div><div class="lnlogo lnbig lnglow lnshine" style="margin:0;width:130px;height:130px"><i class="mark" style="width:100%;height:100%;border-radius:inherit;display:block"></i></div></div>'+
+    '<h2 class="lnfire" style="margin:4px 0 0"><span class="lnletter" style="animation-delay:.25s">K</span><span class="lnletter" style="animation-delay:.4s">C</span><span class="lnletter" style="animation-delay:.55s">L</span></h2>'+
+    '<div class="lnpop" style="font-weight:900;color:#4a1d96;font-size:20px;animation-delay:.7s;letter-spacing:2px">KPD CRICKET LEAGUE</div>'+
+    '<div class="lndiv"></div>'+
+    '<div class="lnpop" style="color:#0b6b52;font-weight:800;margin-top:16px;font-size:17px;animation-delay:1.15s">The tournament is now open!</div>'+
+    '<button class="btn pri lnstart lnpop" id="lnenter" style="animation-delay:1.5s">Enter the app</button>'+
+    '<div class="foot" style="margin-top:26px">Developed by <b>Anthony Dennis</b></div></div>';
+    if(!reduced)confetti(5200);
     document.getElementById('lnenter').onclick=function(){location.href='/'};
   };
 }
-
 /* ---------- scorecard image (PNG download) ---------- */
 function buildCardImage(S){
   var c=S.config,st=S.state,SC=2,W=1000,PAD=46,CW=W-2*PAD;
