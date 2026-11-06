@@ -133,6 +133,17 @@ function publicView(m) {
   return { id: m.id, rev: m.rev, updated: m.updated, config, inTournament: !!(m.config && m.config.tid), state: engine.view(m.config, m.events), storage: store.kind };
 }
 const keyEq = (given, hash) => { const a = Buffer.from(sha(given || '')), b = Buffer.from(String(hash)); return a.length === b.length && crypto.timingSafeEqual(a, b); };
+// Recovery is limited to the fresh replacement ceremony. It never reveals or rotates its scorer key.
+async function canScore(req,m) {
+  if (keyEq(req.headers['x-scorer-key'],m.keyHash)) return true;
+  if(m.id!=='49asxecn'||!m.config||m.config.tid!=='whxrz4tw') return false;
+  let sess=null;try{sess=JSON.parse((await store.getSetting('orgsess'))||'null')}catch(e){}
+  const token=req.headers['x-org-session'];
+  if(!sess||typeof token!=='string'||token.length<16||token.length>64||sess.exp<=Date.now()||!keyEq(token,sess.h))return false;
+  const t=await store.tget(m.config.tid);
+  return !!(t&&keyEq(req.headers['x-org-key'],t.keyHash));
+}
+
 // Match days are plain YYYY-MM-DD strings chosen by the user, never converted between timezones.
 function cleanDate(d) {
   if (typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d)) {
@@ -351,7 +362,7 @@ async function handle(req, res) {
     if (badAuth(ip)) return send(res, 429, { error: 'Too many failed attempts. Try again later.' });
     const m = await store.get(mt[1]);
     if (!m) return send(res, 404, { error: 'Match not found' });
-    if (!keyEq(req.headers['x-scorer-key'], m.keyHash)) { noteBad(ip); return send(res, 403, { error: 'Only the scorer link can download the match backup.' }); }
+    if (!(await canScore(req,m))) { noteBad(ip); return send(res, 403, { error: 'Only an authorized scorer can download the match backup.' }); }
     return send(res, 200, { format: 'cricket-backup', version: 1, exportedAt: new Date().toISOString(), storage: store.kind, counts: { matches: 1, tournaments: 0 }, tournaments: [], matches: [{ id: m.id, config: m.config, events: m.events, keyHash: m.keyHash, rev: m.rev, updated: m.updated }] });
   }
   if ((mt = p.match(/^\/api\/tournaments\/([a-z0-9]{6,12})\/backup$/)) && req.method === 'GET') {
@@ -470,7 +481,7 @@ async function handle(req, res) {
   if ((mt = p.match(/^\/api\/matches\/([a-z0-9]{6,12})\/video$/)) && req.method === 'POST') {
     const m = await store.get(mt[1]);
     if (!m) return send(res, 404, { error: 'Match not found' });
-    if (!keyEq(req.headers['x-scorer-key'], m.keyHash)) return send(res, 403, { error: 'Use this match\'s scorer link to set the live video.' });
+    if (!(await canScore(req,m))) return send(res, 403, { error: 'Use this match\'s scorer link or verified organiser access to set the live video.' });
     const body = await readBody(req);
     const source = body.source || 'youtube';
     if (!['youtube','ninja'].includes(source)) return send(res, 400, {error:'Choose YouTube or VDO.Ninja.'});
@@ -507,6 +518,13 @@ async function handle(req, res) {
     await store.create({ id, config, keyHash: sha(key) });
     return send(res, 201, { id, scorerKey: key, viewerPath: '/m/' + id, scorerPath: '/s/' + id, storage: store.kind });
   }
+  if ((mt = p.match(/^\/api\/matches\/([a-z0-9]{6,12})\/scoring-access$/)) && req.method === 'GET') {
+    const ip = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
+    if(badAuth(ip))return send(res,429,{error:'Too many failed attempts. Try again later.'});
+    const m=await store.get(mt[1]);if(!m)return send(res,404,{error:'Match not found'});
+    if(!(await canScore(req,m))){noteBad(ip);return send(res,403,{error:'Sign in as organiser on the device holding this tournament organiser link.'})}
+    return send(res,200,{ok:true});
+  }
   if ((mt = p.match(/^\/api\/matches\/([a-z0-9]{6,12})$/)) && req.method === 'GET') {
     const m = await store.get(mt[1]);
     if (!m) return send(res, 404, { error: 'Match not found' });
@@ -516,9 +534,7 @@ async function handle(req, res) {
   if ((mt = p.match(/^\/api\/matches\/([a-z0-9]{6,12})\/(event|undo)$/)) && req.method === 'POST') {
     const m = await store.get(mt[1]);
     if (!m) return send(res, 404, { error: 'Match not found' });
-    const key = req.headers['x-scorer-key'] || '';
-    const a = Buffer.from(sha(key)), b = Buffer.from(m.keyHash);
-    if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return send(res, 403, { error: 'This link cannot score. Use the scorer link.' });
+    if (!(await canScore(req,m))) return send(res, 403, { error: 'This device cannot score. Use the scorer link or verified organiser access.' });
     const body = await readBody(req);
     if (body.rev !== undefined && body.rev !== m.rev) return send(res, 409, { error: 'Match changed on another device. Refreshed.', match: publicView(m) });
     let events = m.events.slice();
