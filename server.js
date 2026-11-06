@@ -135,7 +135,13 @@ function cleanTeamReg(body) {
     if (!pn) return { error: 'Every player row needs a name' };
     if (!pe) return { error: 'Every player needs an employee ID' };
     if (players.some((x) => x.name.toLowerCase() === pn.toLowerCase())) continue;
-    players.push({ name: pn, empId: pe, dept: pd });
+    const pr = p && (p.role === 'c' || p.role === 'vc') ? p.role : '';
+    players.push({ name: pn, empId: pe, dept: pd, role: pr });
+  }
+  let seenC = false, seenV = false;
+  for (const pl of players) {
+    if (pl.role === 'c') { if (seenC) pl.role = ''; else seenC = true; }
+    else if (pl.role === 'vc') { if (seenV) pl.role = ''; else seenV = true; }
   }
   if (!name) return { error: 'Enter a team name' };
   if (players.length < MIN_TEAM_PLAYERS) return { error: 'Add at least ' + MIN_TEAM_PLAYERS + ' players with their employee IDs' };
@@ -152,7 +158,7 @@ function cleanStoredTeams(list) {
     const players = Array.isArray(t.players) ? t.players.map((p) => {
       if (typeof p === 'string') { const sn = engine.cleanName(p, 24); return sn ? { name: sn, empId: '', dept: '' } : null; }
       const pn = engine.cleanName(p && p.name, 24);
-      return pn ? { name: pn, empId: engine.cleanName(p && p.empId, 24), dept: engine.cleanName(p && p.dept, 24) } : null;
+      return pn ? { name: pn, empId: engine.cleanName(p && p.empId, 24), dept: engine.cleanName(p && p.dept, 24), role: p && (p.role === 'c' || p.role === 'vc') ? p.role : '' } : null;
     }).filter(Boolean).slice(0, 15) : [];
     if (!name || players.length < 2) continue;
     out.push({ id: t.id, name, players, status: t.status === 'approved' ? 'approved' : 'pending', submittedAt: typeof t.submittedAt === 'string' ? t.submittedAt.slice(0, 40) : new Date().toISOString() });
@@ -270,7 +276,7 @@ async function handle(req, res) {
     const ms = await store.byTournament(t.id);
     const teams = cleanStoredTeams(t.teams);
     const resp = { id: t.id, name: t.name, listed: !!t.listed, matches: ms.map(summary),
-      teams: teams.filter((x) => x.status === 'approved').map((x) => ({ id: x.id, name: x.name, players: x.players.map((p) => p.name) })) };
+      teams: teams.filter((x) => x.status === 'approved').map((x) => ({ id: x.id, name: x.name, players: x.players.map((p) => p.name + (p.role === 'c' ? ' (C)' : p.role === 'vc' ? ' (VC)' : '')) })) };
     const orgKey = req.headers['x-org-key'];
     if (orgKey) {
       const ip = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
@@ -334,6 +340,13 @@ async function handle(req, res) {
     if (ix === -1) return send(res, 404, { error: 'Team not found' });
     if (body && body.action === 'approve') teams[ix].status = 'approved';
     else if (body && body.action === 'remove') teams.splice(ix, 1);
+    else if (body && body.action === 'role') {
+      const pix = typeof body.player === 'number' && Number.isInteger(body.player) ? body.player : -1;
+      const role = body.role === 'c' || body.role === 'vc' ? body.role : '';
+      if (pix < 0 || pix >= teams[ix].players.length) return send(res, 400, { error: 'Unknown player' });
+      if (role) teams[ix].players.forEach((pl, i2) => { if (i2 !== pix && pl.role === role) pl.role = ''; });
+      teams[ix].players[pix].role = role;
+    }
     else return send(res, 400, { error: 'Unknown action' });
     await store.tsetTeams(t.id, teams);
     return send(res, 200, { ok: true });
