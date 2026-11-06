@@ -442,13 +442,20 @@ async function handle(req, res) {
     if (!m) return send(res, 404, { error: 'Match not found' });
     if (!keyEq(req.headers['x-scorer-key'], m.keyHash)) return send(res, 403, { error: 'Use this match\'s scorer link to set the live video.' });
     const body = await readBody(req);
-    const vid = ytId(body.video);
-    if (vid === null) return send(res, 400, { error: 'That does not look like a YouTube video link.' });
+    const source = body.source || 'youtube';
+    if (!['youtube','ninja'].includes(source)) return send(res, 400, {error:'Choose YouTube or VDO.Ninja.'});
+    const raw = String(body.video || '').trim();
+    const vid = source === 'youtube' ? ytId(raw) : '';
+    const ninja = source === 'ninja' && raw ? engine.ninjaViewUrl(raw) : '';
+    if (source === 'youtube' && vid === null) return send(res, 400, {error:'That does not look like a YouTube link.'});
+    if (source === 'ninja' && raw && !ninja) return send(res, 400, {error:'Paste the HTTPS vdo.ninja VIEW link, not a camera, room or director link.'});
     const config = Object.assign({}, m.config);
-    if (vid) config.videoId = vid; else delete config.videoId;
+    delete config.videoId; delete config.ninjaView;
+    if (vid) config.videoId = vid;
+    if (ninja) config.ninjaView = ninja;
     await store.setConfig(m.id, config, true);
     const m2 = await store.get(m.id);
-    return send(res, 200, { ok: true, videoId: vid || null, rev: m2 ? m2.rev : undefined });
+    return send(res, 200, {ok:true,videoId:vid||null,ninjaView:ninja||null,rev:m2?m2.rev:undefined});
   }
   if (req.method === 'POST' && p === '/api/matches') {
     const ip = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
