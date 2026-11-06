@@ -205,6 +205,10 @@ a{color:#0b6b9a}
 button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline-color:#7a3cff}
 /* grand opening ceremony */
 .lnfx{position:fixed;inset:0;z-index:70;pointer-events:none}
+.lnstar{position:absolute;color:#ffd45c;font-size:21px;opacity:0;animation:lnstar 2.2s ease-in-out infinite;pointer-events:none;text-shadow:0 0 12px #ffb300,0 0 22px #ffb30066;z-index:3}
+.lnflash{position:fixed;inset:0;z-index:65;background:radial-gradient(circle at 50% 38%,#fffbe8,#ffd45c66 45%,transparent 72%);animation:lnflash .75s ease-out forwards;pointer-events:none}
+@keyframes lnstar{0%,100%{opacity:0;transform:scale(.4) rotate(0deg)}50%{opacity:1;transform:scale(1.05) rotate(45deg)}}
+@keyframes lnflash{from{opacity:1}to{opacity:0}}
 .lnov{position:fixed;inset:0;z-index:60;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:24px;overflow:hidden;background:radial-gradient(620px 500px at 50% -10%,#ffe9a6,transparent),radial-gradient(520px 520px at 108% 90%,#ffc7dd88,transparent),radial-gradient(520px 520px at -8% 95%,#c9a7ff66,transparent),#fff8e6}
 .lnaur{position:absolute;width:140vmax;height:140vmax;left:50%;top:50%;margin:-70vmax;border-radius:50%;filter:blur(60px);opacity:.5;pointer-events:none}
 .lnaur.a1{background:radial-gradient(circle at 30% 30%,#ffd45c88,transparent 60%);animation:lndrift 14s ease-in-out infinite alternate}
@@ -228,7 +232,7 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 @keyframes lnfade{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
 @keyframes lnpop{0%{transform:scale(.2);opacity:0}70%{transform:scale(1.12)}100%{transform:scale(1);opacity:1}}
 @keyframes lnbig{0%{transform:scale(0) rotate(-14deg);opacity:0}60%{transform:scale(1.25) rotate(4deg);opacity:1}100%{transform:scale(1) rotate(0)}}
-@keyframes lnglow{from{filter:drop-shadow(0 0 6px #ffb00066)}to{filter:drop-shadow(0 0 22px #ff8a00aa)}}
+@keyframes lnglow{from{filter:drop-shadow(0 0 10px #ffb00088)}to{filter:drop-shadow(0 0 32px #ffc400dd)}}
 @keyframes lnring{0%{opacity:.7;transform:scale(.4)}100%{opacity:0;transform:scale(1.9)}}
 @keyframes lnsunrot{to{transform:rotate(360deg)}}
 @keyframes lnshine{0%{left:-80%}55%,100%{left:130%}}
@@ -361,10 +365,11 @@ function confetti(ms){
   var cv=document.createElement('canvas');cv.className='lnfx';document.body.appendChild(cv);
   var ctx=cv.getContext('2d'),W,H,d=window.devicePixelRatio||1;
   function rs(){W=cv.width=Math.round(innerWidth*d);H=cv.height=Math.round(innerHeight*d)}rs();addEventListener('resize',rs);
-  var cols=['#ffb300','#ff5c8a','#7a3cff','#0d8bd9','#14c8a0','#ff7a45','#ffd45c'],P=[];
+  var cols=['#ffd45c','#ffd45c','#ffb300','#ffffff','#fff3c4','#ff9f1c','#ffe9a6','#ff5c8a'],golds=['#ffd45c','#ffffff','#ffb300','#fff3c4'],P=[];
   function cannon(x,ang){for(var i=0;i<70;i++){var a=ang+(-.5+Math.random())*.9,sp=(9+Math.random()*7)*d;P.push({t:'c',x:x,y:H+10,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp,w:(6+Math.random()*7)*d,h:(9+Math.random()*11)*d,c:cols[(Math.random()*cols.length)|0],r:Math.random()*Math.PI,vr:(-.15+Math.random()*.3),born:Date.now()})}}
-  function fw(){var fx2=W*(.18+Math.random()*.64),fy=H*(.14+Math.random()*.34),c=cols[(Math.random()*cols.length)|0],c2=cols[(Math.random()*cols.length)|0];for(var i=0;i<46;i++){var a=Math.PI*2*i/46,sp=(1.6+Math.random()*3.4)*d;P.push({t:'f',x:fx2,y:fy,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp,c:Math.random()<.5?c:c2,born:Date.now(),life:900+Math.random()*500})}}
+  function fw(){var fx2=W*(.18+Math.random()*.64),fy=H*(.14+Math.random()*.34),c=golds[(Math.random()*golds.length)|0],c2=golds[(Math.random()*golds.length)|0];for(var i=0;i<46;i++){var a=Math.PI*2*i/46,sp=(1.6+Math.random()*3.4)*d;P.push({t:'f',x:fx2,y:fy,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp,c:Math.random()<.5?c:c2,born:Date.now(),life:900+Math.random()*500})}}
   cannon(0,Math.PI*-.38);cannon(W,Math.PI*-.62);
+  for(var ti=0;ti<26;ti++)P.push({t:'tw',x:Math.random()*W,y:Math.random()*H*.72,ph:Math.random()*6.3,c:golds[ti%golds.length]});
   var bursts=setInterval(fw,650);setTimeout(function(){clearInterval(bursts)},2700);
   var t0=Date.now();
   (function fr(){
@@ -373,6 +378,7 @@ function confetti(ms){
       if(p.t==='c'){p.x+=p.vx;p.y+=p.vy;p.vy+=.16*d;p.vx*=.992;p.r+=p.vr;
         if(p.y>H+40){P.splice(k,1);continue}
         ctx.save();ctx.translate(p.x,p.y);ctx.rotate(p.r);ctx.fillStyle=p.c;ctx.globalAlpha=Math.max(0,1-Math.pow(el/ms,2));ctx.fillRect(-p.w/2,-p.h/2,p.w,p.h);ctx.restore();
+      }else if(p.t==='tw'){var tw2=.5+.5*Math.sin(el/110+p.ph);ctx.globalAlpha=tw2;ctx.fillStyle=p.c;ctx.shadowColor='#ffb300';ctx.shadowBlur=9*d;ctx.beginPath();ctx.arc(p.x,p.y,1.9*d,0,7);ctx.fill();ctx.shadowBlur=0;
       }else{p.x+=p.vx;p.y+=p.vy;p.vx*=.965;p.vy*=.965;p.vy+=.05*d;
         if(age>p.life){P.splice(k,1);continue}
         ctx.globalAlpha=Math.max(0,1-age/p.life);ctx.fillStyle=p.c;ctx.beginPath();ctx.arc(p.x,p.y,2.6*d,0,7);ctx.fill();
@@ -398,8 +404,8 @@ function launchPage(){
   '<div class="foot" style="margin-top:30px">Developed by <b>Anthony Dennis</b></div></div>';
   document.body.appendChild(ov);
   document.getElementById('lngo').onclick=function(){
-    ov.innerHTML=aur+spk+'<div class="lntro">'+
-    '<div style="position:relative;width:150px;margin:0 auto 18px"><div class="lnsun"></div><div class="lnring" style="inset:-10px"></div><div class="lnring" style="inset:-10px;animation-delay:.45s"></div><div class="lnlogo lnbig lnglow lnshine" style="margin:0;width:130px;height:130px"><i class="mark" style="width:100%;height:100%;border-radius:inherit;display:block"></i></div></div>'+
+    ov.innerHTML=aur+spk+'<div class="lnflash"></div><div class="lntro">'+
+    '<div style="position:relative;width:150px;margin:0 auto 18px"><span class="lnstar" style="left:-26px;top:-12px;animation-delay:.2s">\u2726</span><span class="lnstar" style="right:-24px;top:2px;animation-delay:.9s;font-size:16px">\u2726</span><span class="lnstar" style="left:-14px;bottom:-6px;animation-delay:1.4s;font-size:14px">\u2726</span><span class="lnstar" style="right:-14px;bottom:10px;animation-delay:.55s">\u2726</span><div class="lnsun"></div><div class="lnring" style="inset:-10px"></div><div class="lnring" style="inset:-10px;animation-delay:.45s"></div><div class="lnlogo lnbig lnglow lnshine" style="margin:0;width:130px;height:130px"><i class="mark" style="width:100%;height:100%;border-radius:inherit;display:block"></i></div></div>'+
     '<h2 style="font-size:52px;margin:4px 0 0"><span class="lnletter" style="animation-delay:.25s">K</span><span class="lnletter" style="animation-delay:.4s">C</span><span class="lnletter" style="animation-delay:.55s">L</span></h2>'+
     '<div class="lnpop" style="font-weight:900;color:#4a1d96;font-size:20px;animation-delay:.7s;letter-spacing:2px">KPD CRICKET LEAGUE</div>'+
     '<div class="lndiv"></div>'+
