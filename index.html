@@ -568,7 +568,7 @@ function refreshNames(){
       }).catch(function(){})});
   });
 }
-function tSave(t){try{var l=tList().filter(function(x){return x.id!==t.id});l.push(t);localStorage.setItem('ct_list',JSON.stringify(l))}catch(e){}}
+function tSave(t){try{var l=tList().filter(function(x){return x.id!==t.id});var old=tList().filter(function(x){return x.id===t.id})[0];l.push(old?Object.assign({},old,t):t);localStorage.setItem('ct_list',JSON.stringify(l))}catch(e){}}
 function tSetReg(id,rk){try{var l=tList();l.forEach(function(t){if(t.id===id)t.regKey=rk});localStorage.setItem('ct_list',JSON.stringify(l))}catch(e){}}
 function randKey(n){var c='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789',a=new Uint8Array(n);crypto.getRandomValues(a);var s='';for(var i=0;i<n;i++)s+=c[a[i]%c.length];return s}
 function vList(){try{return JSON.parse(localStorage.getItem('ct_view')||'[]').filter(function(t){return t&&t.id})}catch(e){return[]}}
