@@ -227,7 +227,7 @@ function noteBad(ip) { const now = Date.now(); const a = (bad.get(ip) || []).fil
 const MAX_TOURNAMENTS = 100, MAX_PER_TOURNAMENT = 200, MAX_TEAMS_PER_TOURNAMENT = 40;
 const MIN_TEAM_PLAYERS = 2; // minimum players per registered team (organiser policy; raise to 15 if every slot is mandatory)
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.json': 'application/json', '.webmanifest': 'application/manifest+json' };
-const STATIC_OK = new Set(['index.html']);
+const STATIC_OK = new Set(['index.html','camera.html']);
 function serveStatic(res, rel) {
   if (!STATIC_OK.has(rel)) { res.writeHead(404, { 'content-type': 'text/plain' }); return res.end('Not found'); }
   const f = path.join(PUB, rel);
