@@ -222,8 +222,14 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 .lnshine:after{content:"";position:absolute;top:-30%;left:-80%;width:55%;height:160%;background:linear-gradient(105deg,transparent,#ffffffb8,transparent);transform:skewX(-18deg);animation:lnshine 2.8s ease-in-out infinite;z-index:2;pointer-events:none}
 .lnfloat{animation:lnfloat 3.2s ease-in-out infinite}
 .lnstart{margin:28px auto 0;max-width:300px;animation:lnbtnpulse 1.8s ease-in-out infinite}
+.lnpop.lnstart{animation:lnpop .7s cubic-bezier(.2,1.4,.4,1) both,lnbtnpulse 1.8s ease-in-out infinite}
+.lnpop.lnfire{animation:lnpop .7s cubic-bezier(.2,1.4,.4,1) both,lnshimmer 3s linear infinite}
 .lnpop{animation:lnpop .7s cubic-bezier(.2,1.4,.4,1) both}
-.lnbig{animation:lnbig .9s cubic-bezier(.2,1.5,.3,1) both,lnzoomfill 2.4s ease-in-out 3.7s both;position:relative;z-index:5}
+.lnbig{animation:lnbig .9s cubic-bezier(.2,1.5,.3,1) both;position:relative;z-index:5}
+.lnzoomstage{position:fixed;inset:0;z-index:80;display:flex;align-items:center;justify-content:center;pointer-events:none;opacity:0;animation:lnzstage 2.4s ease-in-out 3.7s both}
+@keyframes lnzstage{0%{opacity:0}10%{opacity:1}68%{opacity:1}100%{opacity:0}}
+.lnzoomimg{width:135vmax;height:135vmax;background:var(--logoimg) center/cover no-repeat;display:block;animation:lnzgrow 2.4s ease-in-out 3.7s both}
+@keyframes lnzgrow{0%{transform:scale(.09)}26%{transform:scale(1)}58%{transform:scale(1)}100%{transform:scale(.09)}}
 .lnglow{animation:lnglow 1.6s ease-in-out infinite alternate}
 .lnring{position:absolute;border:3px solid #ffb300;border-radius:50%;opacity:0;animation:lnring 1.4s ease-out infinite;pointer-events:none}
 .lnsun{position:absolute;inset:-70px;border-radius:50%;background:repeating-conic-gradient(from 0deg,#ffb30038 0deg 7deg,transparent 7deg 15deg);animation:lnsunrot 14s linear infinite;pointer-events:none;-webkit-mask-image:radial-gradient(circle,#000 0 62%,transparent 71%);mask-image:radial-gradient(circle,#000 0 62%,transparent 71%)}
@@ -427,7 +433,7 @@ function launchPage(){
     '<div class="lndiv"></div>'+
     '<div class="lnpop lnfire" style="font-size:30px;font-weight:900;letter-spacing:1.5px;margin-top:16px;animation-delay:6.2s">THE KCL HAS BEGAN</div>'+
     '<button class="btn pri lnstart lnpop" id="lnenter" style="animation-delay:6.7s">Enter the app</button>'+
-    '<div class="foot" style="margin-top:26px">Developed by <b>Anthony Dennis</b></div></div>';
+    '<div class="foot" style="margin-top:26px">Developed by <b>Anthony Dennis</b></div></div><div class="lnzoomstage"><i class="lnzoomimg"></i></div>';
     if(!reduced)confetti(7000);
     document.getElementById('lnenter').onclick=function(){location.href='/'};
   };
