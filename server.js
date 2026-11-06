@@ -130,11 +130,12 @@ function cleanTeamReg(body) {
   for (const p of raw) {
     const pn = engine.cleanName(p && p.name, 24);
     const pe = engine.cleanName(p && p.empId, 24);
-    if (!pn && !pe) continue;
+    const pd = engine.cleanName(p && p.dept, 24);
+    if (!pn && !pe && !pd) continue;
     if (!pn) return { error: 'Every player row needs a name' };
     if (!pe) return { error: 'Every player needs an employee ID' };
     if (players.some((x) => x.name.toLowerCase() === pn.toLowerCase())) continue;
-    players.push({ name: pn, empId: pe });
+    players.push({ name: pn, empId: pe, dept: pd });
   }
   if (!name) return { error: 'Enter a team name' };
   if (players.length < MIN_TEAM_PLAYERS) return { error: 'Add at least ' + MIN_TEAM_PLAYERS + ' players with their employee IDs' };
@@ -149,9 +150,9 @@ function cleanStoredTeams(list) {
     if (!t || typeof t.id !== 'string' || !/^[a-z0-9]{6,12}$/.test(t.id)) continue;
     const name = engine.cleanName(t.name, 24);
     const players = Array.isArray(t.players) ? t.players.map((p) => {
-      if (typeof p === 'string') { const sn = engine.cleanName(p, 24); return sn ? { name: sn, empId: '' } : null; }
+      if (typeof p === 'string') { const sn = engine.cleanName(p, 24); return sn ? { name: sn, empId: '', dept: '' } : null; }
       const pn = engine.cleanName(p && p.name, 24);
-      return pn ? { name: pn, empId: engine.cleanName(p && p.empId, 24) } : null;
+      return pn ? { name: pn, empId: engine.cleanName(p && p.empId, 24), dept: engine.cleanName(p && p.dept, 24) } : null;
     }).filter(Boolean).slice(0, 15) : [];
     if (!name || players.length < 2) continue;
     out.push({ id: t.id, name, players, status: t.status === 'approved' ? 'approved' : 'pending', submittedAt: typeof t.submittedAt === 'string' ? t.submittedAt.slice(0, 40) : new Date().toISOString() });
@@ -418,7 +419,7 @@ async function handle(req, res) {
   }
   if (p.startsWith('/api/')) return send(res, 404, { error: 'Unknown API' });
   if (req.method !== 'GET' && req.method !== 'HEAD') { res.writeHead(405); return res.end(); }
-  if (p === '/' || /^\/(m|s|t|r)\/[a-z0-9]+\/?$/.test(p)) return serveStatic(res, 'index.html');
+  if (p === '/' || p === '/launch' || /^\/(m|s|t|r)\/[a-z0-9]+\/?$/.test(p)) return serveStatic(res, 'index.html');
   return serveStatic(res, p.slice(1));
 }
 
