@@ -216,7 +216,7 @@ async function handle(req, res) {
     const t = /^[a-z0-9]{6,12}$/.test(tid) ? await store.tget(tid) : null;
     if (!t || !keyEq(body && body.orgKey, t.keyHash)) { noteBad(ip); return send(res, 403, { error: 'A valid organiser link on this device is needed to set the password' }); }
     const pw = String((body && body.password) || '');
-    if (pw.length < 8 || pw.length > 72) return send(res, 400, { error: 'Password needs 8 to 72 characters' });
+    if (pw.length < 4 || pw.length > 72) return send(res, 400, { error: 'Password needs 4 to 72 characters' });
     const salt = rnd(16);
     const hash = crypto.scryptSync(pw, salt, 32).toString('hex');
     await store.setSetting('orgpass', JSON.stringify({ salt, hash }));
