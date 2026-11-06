@@ -184,9 +184,13 @@ label{color:#6d6791}
 .pregrow .btn{flex:1}
 .plrow{display:flex;justify-content:space-between;gap:10px;padding:4px 0;border-top:1px dashed #f0dca0}
 .plrow:first-child{border-top:0}
+.plrow .pn{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.plrow .pdp{flex:none;max-width:32%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12.5px;align-self:center}
+.plrow .pid{flex:none;font-size:12.5px;align-self:center}
 .prow{display:flex;gap:8px;margin-bottom:8px}
 .prow .rpname{flex:3}
 .prow .rpemp{flex:2}
+.prow .rpdep{flex:2}
 .dow{color:#8a6a1f}.day{background:#fff3d1;color:#3a2b00}.day.has{background:linear-gradient(135deg,#d9f7ec,#fff0c2);box-shadow:inset 0 0 0 1px #0b8f6a88;color:#1b1740}
 .day.today{box-shadow:inset 0 0 0 2px #7a3cff}.day.sel{background:linear-gradient(135deg,#ffc933,#ff7a45);color:#2b1500;box-shadow:0 4px 12px #ff7a4566}
 .day i{background:#0b8f6a;color:#fff}.day.sel i{background:#3b1c6e;color:#fff}
@@ -199,6 +203,19 @@ a{color:#0b6b9a}
 .cout{color:#c2184b}.eo{background:#fff3d1;color:#6b5a1e;border-top-color:#f0dca0}
 .stale{color:#b87400}
 button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline-color:#7a3cff}
+/* grand opening ceremony */
+.lnov{position:fixed;inset:0;z-index:60;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:24px;overflow:hidden;background:radial-gradient(620px 500px at 50% -10%,#ffe9a6,transparent),radial-gradient(520px 520px at 108% 90%,#ffc7dd88,transparent),radial-gradient(520px 520px at -8% 95%,#c9a7ff66,transparent),#fff8e6}
+.lntro{animation:lnfade .8s ease both;position:relative;z-index:2;width:100%;max-width:430px}
+.lnlogo{width:112px;height:112px;border-radius:30px;background:linear-gradient(135deg,#ffb300,#ff5c8a 60%,#7a3cff);box-shadow:0 18px 44px #ff9f1c66;display:flex;align-items:center;justify-content:center;margin:0 auto 18px;font-size:60px}
+.lnstart{margin:28px auto 0;max-width:300px}
+.lnpop{animation:lnpop .7s cubic-bezier(.2,1.4,.4,1) both}
+.lnglow{animation:lnglow 1.6s ease-in-out infinite alternate}
+.lnring{position:absolute;border:3px solid #ffb300;border-radius:50%;opacity:0;animation:lnring 1.4s ease-out infinite;pointer-events:none}
+canvas.lnfx{position:fixed;inset:0;z-index:61;pointer-events:none}
+@keyframes lnfade{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+@keyframes lnpop{0%{transform:scale(.2);opacity:0}70%{transform:scale(1.12)}100%{transform:scale(1);opacity:1}}
+@keyframes lnglow{from{filter:drop-shadow(0 0 6px #ffb00066)}to{filter:drop-shadow(0 0 22px #ff8a00aa)}}
+@keyframes lnring{0%{opacity:.7;transform:scale(.4)}100%{opacity:0;transform:scale(1.9)}}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 
 .mark{background-image:url(data:image/jpeg;base64,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);background-size:cover;background-position:center}
@@ -242,7 +259,7 @@ html:not(.pd) .sheet{align-items:center}html:not(.pd) .sheet>div{border-radius:2
 var app=document.getElementById('app');
 var path=location.pathname;
 var mm=path.match(/^\/(m|s|t|r)\/([a-z0-9]+)/);
-var mode=mm?mm[1]:'home', id=mm?mm[2]:null;
+var mode=mm?mm[1]:(path.replace(/\/+$/,'')==='/launch'?'launch':'home'), id=mm?mm[2]:null;
 var S=null, T=null, ym=null, selDay=null, key=null, tab='live', busy=false, extra='', sheet=null, lastOk=0, err=null, polling=null, info={storage:'?'};
 function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
 function ini(n){var w=String(n).trim().split(/\s+/);return (w.length>1?w[0][0]+w[1][0]:String(n).slice(0,2)).toUpperCase()}
@@ -317,7 +334,144 @@ function downloadReport(){
   var blob=new Blob([buildReport(S)],{type:'text/html'}),a=document.createElement('a');
   a.href=URL.createObjectURL(blob);a.download=name;document.body.appendChild(a);a.click();setTimeout(function(){URL.revokeObjectURL(a.href);a.remove()},1500);toast('Report downloaded',1);
 }
-document.addEventListener('click',function(e){if(e.target&&e.target.id==='dlrep')downloadReport();if(e.target&&e.target.id==='dlbk')dlBackup('/api/matches/'+id+'/backup',{'x-scorer-key':key},'match-backup-'+id);if(e.target&&e.target.id==='dltb'){var o=tList().filter(function(t){return t.id===id})[0];if(o)dlBackup('/api/tournaments/'+id+'/backup',{'x-org-key':o.key},'tournament-backup-'+id)}});
+
+/* ---------- grand opening ceremony (/launch) ---------- */
+function confetti(ms){
+  var cv=document.createElement('canvas');cv.className='lnfx';document.body.appendChild(cv);
+  var ctx=cv.getContext('2d'),W,H;function rs(){var d=window.devicePixelRatio||1;W=cv.width=Math.round(innerWidth*d);H=cv.height=Math.round(innerHeight*d)}rs();addEventListener('resize',rs);
+  var cols=['#ffb300','#ff5c8a','#7a3cff','#0d8bd9','#14c8a0','#ff7a45','#ffd45c'],P=[],d=window.devicePixelRatio||1;
+  for(var i=0;i<170;i++)P.push({x:Math.random()*W,y:-Math.random()*H*.6-30*d,w:(6+Math.random()*7)*d,h:(9+Math.random()*11)*d,c:cols[i%cols.length],vy:(2.2+Math.random()*3.6)*d,vx:(-1.2+Math.random()*2.4)*d,r:Math.random()*Math.PI,vr:(-.12+Math.random()*.24)});
+  var t0=Date.now();
+  (function fr(){
+    var el=Date.now()-t0;ctx.clearRect(0,0,W,H);
+    for(var k=0;k<P.length;k++){var p=P[k];p.x+=p.vx;p.y+=p.vy;p.r+=p.vr;if(p.y>H+30){p.y=-30;p.x=Math.random()*W}ctx.save();ctx.translate(p.x,p.y);ctx.rotate(p.r);ctx.fillStyle=p.c;ctx.globalAlpha=Math.max(0,1-Math.pow(el/ms,2));ctx.fillRect(-p.w/2,-p.h/2,p.w,p.h);ctx.restore()}
+    if(el<ms)requestAnimationFrame(fr);else cv.remove();
+  })();
+}
+function launchPage(){
+  document.title='KCL (KPD Cricket League) - Grand Opening';
+  var reduced=window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  app.innerHTML='<div class="lnov"><div class="lntro">'+
+  '<div class="lnlogo lnglow">🏏</div>'+
+  '<h2 class="fire" style="font-size:44px;margin:0">KCL</h2>'+
+  '<div style="font-weight:900;color:#4a1d96;font-size:19px;margin-top:4px;letter-spacing:.4px">KPD Cricket League</div>'+
+  '<div class="mut" style="margin-top:14px;font-size:14.5px">Grand Opening Ceremony</div>'+
+  '<button class="btn pri lnstart" id="lngo">Tap to Start</button>'+
+  '<div class="foot" style="margin-top:30px">Developed by <b>Anthony Dennis</b></div></div></div>';
+  document.getElementById('lngo').onclick=function(){
+    var ov=document.querySelector('.lnov');
+    ov.innerHTML='<div class="lntro">'+
+    '<div style="position:relative;width:130px;margin:0 auto 16px"><div class="lnring" style="inset:-10px"></div><div class="lnring" style="inset:-10px;animation-delay:.45s"></div><div class="lnlogo lnpop lnglow" style="margin:0">🏆</div></div>'+
+    '<h2 class="fire lnpop" style="font-size:52px;margin:4px 0 0;animation-delay:.18s">KCL</h2>'+
+    '<div class="lnpop" style="font-weight:900;color:#4a1d96;font-size:20px;animation-delay:.34s;letter-spacing:.4px">KPD Cricket League</div>'+
+    '<div class="lnpop" style="color:#0b6b52;font-weight:800;margin-top:16px;font-size:17px;animation-delay:.6s">The tournament is now open!</div>'+
+    '<button class="btn pri lnstart lnpop" id="lnenter" style="animation-delay:1s">Enter the app</button>'+
+    '<div class="foot" style="margin-top:28px">Developed by <b>Anthony Dennis</b></div></div>';
+    if(!reduced)confetti(3400);
+    document.getElementById('lnenter').onclick=function(){location.href='/'};
+  };
+}
+
+/* ---------- scorecard image (PNG download) ---------- */
+function buildCardImage(S){
+  var c=S.config,st=S.state,SC=2,W=1000,PAD=46,CW=W-2*PAD;
+  var cv=document.createElement('canvas'),ctx=cv.getContext('2d');
+  function F(w,s){return w+' '+s+'px system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif'}
+  function fit(t,max){t=String(t==null?'':t);if(ctx.measureText(t).width<=max)return t;while(t.length>1&&ctx.measureText(t+'…').width>max)t=t.slice(0,-1);return t+'…'}
+  function rr(x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath()}
+  var innings=st.innings.filter(function(i){return i.balls>0});
+  var status=st.result?st.result.text:(innings.length?'Match in progress when this image was saved':'Match not started');
+  var meta=(c.date?niceDate(c.date)+' · ':'')+c.teams[0].name+' v '+c.teams[1].name+' · '+c.overs+' over'+(c.overs>1?'s':'')+' a side'+(c.demo?' · Practice match':'');
+  function draw(measure){
+    var y=16;
+    // header band
+    var hh=250;
+    if(!measure){var g=ctx.createLinearGradient(0,0,W,0);g.addColorStop(0,'#3b1c6e');g.addColorStop(.55,'#a3246f');g.addColorStop(1,'#e8590c');ctx.fillStyle=g;rr(16,y,W-32,hh,28);ctx.fill()}
+    var bx=PAD+6,by=y+34;
+    if(!measure){var lg=ctx.createLinearGradient(bx,by,bx+34,by+34);lg.addColorStop(0,'#ffb300');lg.addColorStop(.6,'#ff5c8a');lg.addColorStop(1,'#7a3cff');ctx.fillStyle=lg;rr(bx,by,34,34,10);ctx.fill();ctx.fillStyle='#fff';ctx.font=F(900,19)}
+    if(!measure)ctx.fillText('KCL (KPD Cricket League)',bx+48,by+24);
+    if(!measure){ctx.font=F(900,40);ctx.fillStyle='#fff';ctx.fillText(fit(c.title,CW-12),bx,by+82)}
+    if(!measure){ctx.font=F(600,18);ctx.fillStyle='#dccbf7';ctx.fillText(fit(meta,CW-12),bx,by+116)}
+    if(!measure){ctx.font=F(800,19);var sw=ctx.measureText(status).width;ctx.fillStyle='#ffffff26';rr(bx,by+138,sw+36,42,14);ctx.fill();ctx.strokeStyle='#ffd45c';ctx.lineWidth=2;rr(bx,by+138,sw+36,42,14);ctx.stroke();ctx.fillStyle='#fff2c2';ctx.fillText(fit(status,CW-48),bx+18,by+166)}
+    y+=16+hh+26;
+    // team score tiles
+    var tw=(CW-20)/2;
+    [0,1].forEach(function(t){
+      var x=16+PAD-6+t*(tw+20),inn=st.innings.filter(function(i){return i.bat===t&&i.balls>0})[0];
+      if(!measure){ctx.fillStyle='#fff';rr(x,y,tw,118,18);ctx.fill();ctx.strokeStyle='#f0dca0';ctx.lineWidth=2;rr(x,y,tw,118,18);ctx.stroke();
+        ctx.fillStyle='#1b1740';ctx.font=F(800,20);ctx.fillText(fit(c.teams[t].name,tw-32),x+16,y+32)}
+      if(inn){if(!measure){ctx.font=F(900,40);ctx.fillText(inn.runs+'/'+inn.wkts,x+16,y+76);ctx.font=F(600,15);ctx.fillStyle='#6d6791';ctx.fillText(inn.overs+' / '+c.overs+' overs · RR '+inn.rr.toFixed(2),x+16,y+102)}}
+      else if(!measure){ctx.font=F(600,16);ctx.fillStyle='#6d6791';ctx.fillText('Yet to bat',x+16,y+74)}
+    });
+    y+=118+30;
+    innings.forEach(function(i,k){
+      var by2=i.endedBy?({allout:'All out',overs:'Overs complete',target:'Target reached',declared:'Innings closed by scorer'})[i.endedBy]||String(i.endedBy):(i.done?'Innings complete':'Innings in progress');
+      if(!measure){ctx.fillStyle='#241047';ctx.font=F(800,25);ctx.fillText(fit((i.idx===0?'1st':'2nd')+' innings · '+i.batName,CW),16+PAD-6,y+8);ctx.fillStyle='#ffb300';ctx.fillRect(16+PAD-6,y+18,64,4)}
+      y+=34;
+      if(!measure){ctx.fillStyle='#6d6791';ctx.font=F(600,15);ctx.fillText(fit(by2+(i.target?' · Target '+i.target:'')+' · '+i.runs+'/'+i.wkts+' in '+i.overs+' overs',CW),16+PAD-6,y+8)}
+      y+=30;
+      var cols=[W-PAD-260,W-PAD-200,W-PAD-140,W-PAD-80,W-PAD-16],heads=['R','B','4s','6s','SR'];
+      if(!measure){ctx.font=F(700,13);ctx.fillStyle='#7a6a2d';ctx.fillText('BATTER',16+PAD-6,y+8);heads.forEach(function(h2,j){var w2=ctx.measureText(h2).width;ctx.fillText(h2,cols[j]-w2,y+8)})}
+      y+=20;
+      i.batting.forEach(function(b){
+        if(!measure){ctx.strokeStyle='#f3e6bd';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(16+PAD-6,y+10);ctx.lineTo(W-16-PAD+6,y+10);ctx.stroke();
+          ctx.fillStyle='#1b1740';ctx.font=F(700,17);ctx.fillText(fit(b.name,CW-300),16+PAD-6,y+30);
+          ctx.font=F(700,17);var vals=[b.runs,b.balls,b.fours,b.sixes,b.sr];vals.forEach(function(v,j){var t2=String(v),w2=ctx.measureText(t2).width;ctx.fillText(t2,cols[j]-w2,y+30)});
+          ctx.font=F(400,13.5);ctx.fillStyle='#6d6791';ctx.fillText(fit(b.notOut?'not out':(b.out||''),CW-300),16+PAD-6,y+50)}
+        y+=58;
+      });
+      var ex=i.extras;
+      if(!measure){ctx.fillStyle='#1b1740';ctx.font=F(600,15);ctx.fillText('Extras',16+PAD-6,y+18);ctx.font=F(400,13.5);ctx.fillStyle='#6d6791';ctx.fillText('wd '+ex.wd+', nb '+ex.nb+', b '+ex.b+', lb '+ex.lb,16+PAD-6+60,y+18);
+        ctx.font=F(800,16);var et=String(i.extrasTotal),ew=ctx.measureText(et).width;ctx.fillText(et,cols[0]-ew,y+18)}
+      y+=34;
+      if(!measure){ctx.fillStyle='#f3f6fd';rr(16+PAD-16,y-6,CW+32,38,10);ctx.fill();ctx.fillStyle='#1b1740';ctx.font=F(800,16);ctx.fillText('Total',16+PAD-6,y+18);var tt=i.runs+'/'+i.wkts+' ('+i.overs+' ov)',tw2=ctx.measureText(tt).width;ctx.fillText(tt,W-16-PAD+6-tw2,y+18)}
+      y+=52;
+      if(i.bowling.length){
+        if(!measure){ctx.font=F(700,13);ctx.fillStyle='#7a6a2d';ctx.fillText('BOWLING · '+fit(i.bowlName,200).toUpperCase(),16+PAD-6,y+8)}
+        y+=18;
+        var bc=[W-PAD-220,W-PAD-160,W-PAD-100,W-PAD-50,W-PAD-16],bh=['O','M','R','W','ECON'];
+        if(!measure){ctx.font=F(700,13);bh.forEach(function(h2,j){var w2=ctx.measureText(h2).width;ctx.fillText(h2,bc[j]-w2,y+8)})}
+        y+=16;
+        i.bowling.forEach(function(b){
+          if(!measure){ctx.strokeStyle='#f3e6bd';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(16+PAD-6,y+8);ctx.lineTo(W-16-PAD+6,y+8);ctx.stroke();
+            ctx.fillStyle='#1b1740';ctx.font=F(600,15.5);ctx.fillText(fit(b.name,CW-280),16+PAD-6,y+28);
+            var vals=[b.overs,b.maidens,b.runs,b.wkts,b.econ.toFixed(1)];vals.forEach(function(v,j){var t2=String(v),w2=ctx.measureText(t2).width;ctx.fillStyle=j===3&&b.wkts?'#d6284f':'#1b1740';ctx.font=j===3?F(800,15.5):F(600,15.5);ctx.fillText(t2,bc[j]-w2,y+28)})}
+          y+=36;
+        });
+        y+=6;
+      }
+      if(i.fow.length){
+        if(!measure){ctx.fillStyle='#6d6791';ctx.font=F(600,14.5);ctx.fillText(fit('Fall of wickets: '+i.fow.map(function(f){return f.runs+'/'+f.wkts+' ('+f.name+', '+f.over+' ov)'}).join(' · '),CW),16+PAD-6,y+8)}
+        y+=30;
+      }
+      y+=16;
+    });
+    // footer
+    if(!measure){ctx.strokeStyle='#e3d294';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(16+PAD-6,y+8);ctx.lineTo(W-16-PAD+6,y+8);ctx.stroke();
+      ctx.fillStyle='#7a6a2d';ctx.font=F(600,14);var f1='Saved '+new Date().toLocaleString()+(st.result?'':' · scores may have changed since');var fw=ctx.measureText(f1).width;ctx.fillText(f1,(W-fw)/2,y+32);
+      ctx.fillStyle='#2b1458';ctx.font=F(800,14.5);var f2='Developed by Anthony Dennis';fw=ctx.measureText(f2).width;ctx.fillText(f2,(W-fw)/2,y+56)}
+    y+=84;
+    return y;
+  }
+  var h=draw(true);
+  cv.width=W*SC;cv.height=Math.round(h*SC);
+  ctx=cv.getContext('2d');ctx.scale(SC,SC);
+  ctx.fillStyle='#fff8e6';ctx.fillRect(0,0,W,h);
+  draw(false);
+  return cv;
+}
+function downloadImage(){
+  if(!S)return;
+  var cv;
+  try{cv=buildCardImage(S)}catch(e){toast('Could not create the image');return}
+  cv.toBlob(function(b){
+    if(!b){toast('Could not create the image');return}
+    var name=(S.config.title||'Match').replace(/[^A-Za-z0-9]+/g,'-').replace(/^-|-$/g,'')+(S.config.date?'-'+S.config.date:'')+'-scorecard.png';
+    var a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=name;document.body.appendChild(a);a.click();setTimeout(function(){URL.revokeObjectURL(a.href);a.remove()},1500);toast('Scorecard image saved',1);
+  },'image/png');
+}
+
+document.addEventListener('click',function(e){if(e.target&&e.target.id==='dlrep')downloadReport();if(e.target&&e.target.id==='dlimg')downloadImage();if(e.target&&e.target.id==='dlbk')dlBackup('/api/matches/'+id+'/backup',{'x-scorer-key':key},'match-backup-'+id);if(e.target&&e.target.id==='dltb'){var o=tList().filter(function(t){return t.id===id})[0];if(o)dlBackup('/api/tournaments/'+id+'/backup',{'x-org-key':o.key},'tournament-backup-'+id)}});
 function dlBackup(url,hd,nm){
   fetch(url,{headers:hd}).then(function(r){return r.json().then(function(j){if(!r.ok){toast(j.error||'Could not download');return}
     var b=new Blob([JSON.stringify(j,null,1)],{type:'application/json'}),a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=nm+'-'+todayStr()+'.json';document.body.appendChild(a);a.click();setTimeout(function(){URL.revokeObjectURL(a.href);a.remove()},1500);toast('Backup downloaded',1)})},function(){toast('Network problem. Try again.')});
@@ -373,6 +527,7 @@ function viewPane(){
   knownTs().forEach(function(t){h+='<div class="vgrp" id="vg-'+esc(t.id)+'" data-n="'+esc(t.name)+'"><b class="fire">'+esc(t.name)+'</b><div class="mut" style="margin-top:6px">Loading scores...</div></div>'});
   h+='</div><span class="mut" id="vexp" style="display:none">No sign-in, nothing to create. Open the match link or calendar link the organiser shared - live scores, commentary and results update by themselves. Got a link on WhatsApp? Tap it, or paste it in the Open a link box below.</span>';
   h+='<button class="btn sec small" style="margin-top:10px" data-go="olink">Open a shared link</button>';
+  h+='<div style="margin-top:16px;text-align:center"><a href="/launch">✨ Grand opening ceremony</a></div>';
   return h;
 }
 function fillViewerGroup(g){
@@ -543,9 +698,9 @@ function renderT(){
     h+='<button class="btn sec" id="nreg" style="margin-top:10px">'+(T.registration==='open'?'Create new link (disables the old one)':'Create registration link')+'</button>';
     var pend=T.pendingTeams||[];
     h+='<h1>Waiting for approval ('+pend.length+')</h1>';
-    h+=pend.length?pend.map(function(tm){return '<div class="preg"><b class="fire">'+esc(tm.name)+'</b><div style="margin-top:2px">'+tm.players.map(function(p){return '<div class="plrow"><span>'+esc(p.name)+'</span><span class="mut">'+(p.empId?'ID: '+esc(p.empId):'')+'</span></div>'}).join('')+'</div><div class="pregrow"><button class="btn pri" data-tap="'+esc(tm.id)+'">Approve</button><button class="btn sec" data-trm="'+esc(tm.id)+'">Remove</button></div></div>'}).join(''):'<div class="mut">No teams waiting.</div>';
+    h+=pend.length?pend.map(function(tm){return '<div class="preg"><b class="fire">'+esc(tm.name)+'</b><div style="margin-top:2px">'+tm.players.map(function(p){return '<div class="plrow"><span class="pn">'+esc(p.name)+'</span><span class="mut pdp">'+(p.dept?esc(p.dept):'—')+'</span><span class="mut pid">'+(p.empId?'ID: '+esc(p.empId):'')+'</span></div>'}).join('')+'</div><div class="pregrow"><button class="btn pri" data-tap="'+esc(tm.id)+'">Approve</button><button class="btn sec" data-trm="'+esc(tm.id)+'">Remove</button></div></div>'}).join(''):'<div class="mut">No teams waiting.</div>';
     var tapp=T.approvedTeams||[];
-    if(tapp.length){h+='<h1>Approved teams &amp; player IDs (only you see this)</h1>'+tapp.map(function(tm){return '<div class="preg"><b class="fire">'+esc(tm.name)+'</b><div style="margin-top:2px">'+tm.players.map(function(p){return '<div class="plrow"><span>'+esc(p.name)+'</span><span class="mut">'+(p.empId?'ID: '+esc(p.empId):'')+'</span></div>'}).join('')+'</div></div>'}).join('')}
+    if(tapp.length){h+='<h1>Approved teams &amp; player details (only you see this)</h1>'+tapp.map(function(tm){return '<div class="preg"><b class="fire">'+esc(tm.name)+'</b><div style="margin-top:2px">'+tm.players.map(function(p){return '<div class="plrow"><span class="pn">'+esc(p.name)+'</span><span class="mut pdp">'+(p.dept?esc(p.dept):'—')+'</span><span class="mut pid">'+(p.empId?'ID: '+esc(p.empId):'')+'</span></div>'}).join('')+'</div></div>'}).join('')}
     h+='</div>';
   }
   if(own)h+='<button class="btn pri" id="addm" style="margin-top:6px">Add a match</button><button class="btn sec" id="tgl" style="margin-top:10px">'+(T.listed?'Hide from home Viewer tab':'Show on home Viewer tab')+'</button><div class="mut" style="font-size:12.5px;margin-top:6px">'+(T.listed?'On: anyone who opens the app or website sees live scores for this tournament on the home Viewer tab.':'Off: only people with the calendar link can find this tournament. Turn this on so viewers see scores from the home Viewer tab, no link needed.')+'</div><button class="btn sec" id="dltb" style="margin-top:10px">Download tournament backup (file)</button><button class="btn sec" id="corg" style="margin-top:10px">Copy private organiser link</button><div class="mut" style="font-size:12.5px;margin-top:6px">The organiser link opens owner controls on another device, like the Android app. Keep it private: anyone with it can manage this calendar.</div>';
@@ -746,8 +901,8 @@ function viewerBody(){return tab==='live'?liveTab():tab==='card'?scorecardTab():
 function render(){
   if(!S){app.innerHTML=(err?'<div class="warn" style="margin-top:30px">'+esc(err)+'</div>':'<div class="mut" style="margin-top:40px;text-align:center">Loading match...<br>The free server may take up to a minute to wake up.</div>')+FOOT;return}
   var h=head()+tabsHtml()+'<div class="dsk '+(mode==='s'?'sc':'vw')+'"><div class="dl">'+viewerBody()+(mode==='s'?'</div><div class="dr">':'');
-  if(mode==='s')h+=scorerPanel()+videoCard()+attachCard()+'<div class="card"><button class="btn sec" id="dlrep">Download match report</button><button class="btn sec" id="dlbk" style="margin-top:10px">Download match backup (file)</button><div class="mut" style="font-size:12.5px;margin-top:8px">The report is a printable match card. The backup file holds every ball and can restore this match later. It never contains your scorer link.</div></div>';
-  else{h+='<div class="card" style="margin-top:6px"><button class="btn sec" id="share">Share this live scoreboard</button><button class="btn sec" id="dlrep" style="margin-top:10px">Download match report</button></div>'}
+  if(mode==='s')h+=scorerPanel()+videoCard()+attachCard()+'<div class="card"><button class="btn sec" id="dlrep">Download match report</button><button class="btn sec" id="dlimg" style="margin-top:10px">Save scorecard as image</button><button class="btn sec" id="dlbk" style="margin-top:10px">Download match backup (file)</button><div class="mut" style="font-size:12.5px;margin-top:8px">The report is a printable match card. The backup file holds every ball and can restore this match later. It never contains your scorer link.</div></div>';
+  else{h+='<div class="card" style="margin-top:6px"><button class="btn sec" id="share">Share this live scoreboard</button><button class="btn sec" id="dlrep" style="margin-top:10px">Download match report</button><button class="btn sec" id="dlimg" style="margin-top:10px">Save scorecard as image</button></div>'}
   h+='</div></div>'+FOOT;app.innerHTML=h;tickLabel();wire();
   if(mode==='s')openNeeds();
 }
@@ -861,23 +1016,23 @@ function regPage(){
   fetch('/api/tournaments/'+id).then(function(r){return r.json().then(function(j){return{ok:r.ok,j:j}})}).then(function(r){
     if(!r.ok){app.innerHTML=top+'<div class="warn" style="margin-top:30px">Tournament not found.</div>'+FOOT;return}
     var name=r.j.name;
-    var prows='';for(var pi=0;pi<15;pi++)prows+='<div class="prow"><input class="rpname" maxlength="24" placeholder="Player '+(pi+1)+' name"><input class="rpemp" maxlength="24" placeholder="Employee ID"></div>';
+    var prows='';for(var pi=0;pi<15;pi++)prows+='<div class="prow"><input class="rpname" maxlength="24" placeholder="Player '+(pi+1)+' name"><input class="rpemp" maxlength="24" placeholder="Employee ID"><input class="rpdep" maxlength="24" placeholder="Dept (optional)"></div>';
     app.innerHTML=top+'<div class="hero wide"><h2 class="fire">'+esc(name)+'</h2><p>Team registration</p></div>'+
     '<div class="card"><div class="mut">Enter your team details. The organiser reviews every team before it shows in the app.</div>'+
     (rk?'':'<div class="warn" style="margin-top:8px">This link looks incomplete. Ask the organiser to share the full registration link again.</div>')+
     '<label>Team name</label><input id="rname" maxlength="24" placeholder="Your team name">'+
-    '<label>Players (2 to 15) - every player needs an employee ID</label>'+prows+
+    '<label>Players (2 to 15) - every player needs an employee ID; department is optional</label>'+prows+
     '<button class="btn pri" id="rgo" style="margin-top:14px">Submit team</button></div>'+FOOT;
     document.getElementById('rgo').onclick=function(){
       var b=this;b.disabled=true;
-      var rns=Array.prototype.slice.call(document.querySelectorAll('.rpname')),res=Array.prototype.slice.call(document.querySelectorAll('.rpemp'));
+      var rns=Array.prototype.slice.call(document.querySelectorAll('.rpname')),res=Array.prototype.slice.call(document.querySelectorAll('.rpemp')),rds=Array.prototype.slice.call(document.querySelectorAll('.rpdep'));
       var players=[];
       for(var ri=0;ri<rns.length;ri++){
-        var pn=rns[ri].value.trim(),pe=res[ri].value.trim();
-        if(!pn&&!pe)continue;
+        var pn=rns[ri].value.trim(),pe=res[ri].value.trim(),pdp=rds[ri].value.trim();
+        if(!pn&&!pe&&!pdp)continue;
         if(!pn){toast('Every player row needs a name');b.disabled=false;return}
         if(!pe){toast('Every player needs an employee ID');b.disabled=false;return}
-        players.push({name:pn,empId:pe});
+        players.push({name:pn,empId:pe,dept:pdp});
       }
       if(players.length<2){toast('Add at least 2 players');b.disabled=false;return}
       api('POST','/api/tournaments/'+id+'/teams',{name:v('rname'),players:players},null,rk?{'x-reg-key':rk}:{}).then(function(rr){
@@ -890,7 +1045,8 @@ function regPage(){
 }
 
 /* ---------- boot ---------- */
-if(mode==='home')home();
+if(mode==='launch')launchPage();
+else if(mode==='home')home();
 else if(mode==='t'){
   var om=location.hash.match(/o=([A-Za-z0-9]+)/);
   if(om){history.replaceState(null,'',location.pathname);fetch('/api/tournaments/'+id).then(function(r){return r.json()}).then(function(j){if(j&&j.name){tSave({id:id,name:j.name,key:om[1]});renderT()}})}
