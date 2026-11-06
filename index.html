@@ -187,7 +187,10 @@ label{color:#6d6791}
 .plrow .pn{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .plrow .pdp{flex:none;max-width:32%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12.5px;align-self:center}
 .plrow .pid{flex:none;font-size:12.5px;align-self:center}
-.prow{display:flex;gap:8px;margin-bottom:8px}
+.prow{display:flex;gap:8px;margin-bottom:8px;align-items:center}
+.rlbtn{flex:none;padding:4px 9px;border-radius:999px;border:1.5px solid #d4a017;background:#fff;color:#8a6d00;font-weight:800;font-size:11.5px;cursor:pointer;font-family:inherit}
+.rlbtn.on{background:linear-gradient(135deg,#ffd45c,#e8a90c);color:#4a2f00;border-color:#c88f0a}
+.rlbtn.sm{padding:2px 8px;font-size:10.5px;align-self:center}
 .prow .rpname{flex:3}
 .prow .rpemp{flex:2}
 .prow .rpdep{flex:2}
@@ -620,6 +623,8 @@ function fillViewerScores(){
       var d=document.createElement('div');d.className='vgrp';d.id='vg-'+t.id;d.setAttribute('data-n',t.name||'Tournament');
       d.innerHTML='<b class="fire">'+esc(t.name||'Tournament')+'</b><div class="mut" style="margin-top:6px">Loading scores...</div>';
       grps.appendChild(d);
+      var lk=document.getElementById('lkhome');
+      if(lk&&!document.getElementById('lkb-'+t.id)){var la=document.createElement('a');la.className='btn sec';la.id='lkb-'+t.id;la.style.marginTop='8px';la.style.textDecoration='none';la.href='/t/'+t.id;la.textContent=(t.name||'Tournament')+' - all links';lk.appendChild(la)}
     });
     var gs=grps.querySelectorAll('.vgrp');
     if(lead)lead.textContent=gs.length?'Live scores and scorecards - tap a match to open it:':'';
@@ -641,10 +646,19 @@ function wireRole(){
   var bs=t.querySelectorAll('button');for(var i=0;i<bs.length;i++)(function(b){b.onclick=function(){set(b.getAttribute('data-r'))}})(bs[i]);
   set('view');
 }
+function homeLinksCard(){
+  var seen={},items=[];
+  tList().forEach(function(t){if(t&&t.id&&!seen[t.id]){seen[t.id]=1;items.push({id:t.id,name:t.name})}});
+  knownTs().forEach(function(t){if(t&&t.id&&!seen[t.id]){seen[t.id]=1;items.push({id:t.id,name:t.name})}});
+  var h='<h1>All links in one spot</h1><div class="card"><div class="mut">Every link for your tournament - calendar and live scores, opening ceremony, captain registration and scorer links:</div><div id="lkhome">';
+  items.forEach(function(t){h+='<a class="btn sec" id="lkb-'+esc(t.id)+'" style="margin-top:8px;text-decoration:none" href="/t/'+esc(t.id)+'">'+esc(t.name)+' - all links</a>'});
+  h+='</div></div>';
+  return h;
+}
 function home(){
   var qt=(location.search.match(/[?&]t=([a-z0-9]+)/)||[])[1]||'';
   app.innerHTML='<div class="top"><b class="brand"><i class="mark"></i>KCL (KPD Cricket League)</b><span></span></div>'+
-  '<div class="hero"><h2>Live cricket scoring</h2><p>Score ball by ball. Share one link for live scores.</p></div>'+roleGuide()+
+  '<div class="hero"><h2>Live cricket scoring</h2><p>Score ball by ball. Share one link for live scores.</p></div>'+homeLinksCard()+roleGuide()+
   '<div class="card" style="margin-top:14px"><label>Match title</label><input id="title" placeholder="e.g. Match 1" maxlength="50">'+
   '<div class="two"><div><label>Match date</label><input id="date" type="date" value="'+todayStr()+'"></div><div><label>Tournament</label><select id="tsel"><option value="">None</option>'+tList().map(function(t){return '<option value="'+esc(t.id)+'"'+(qt===t.id?' selected':'')+'>'+esc(t.name)+'</option>'}).join('')+'</select></div></div>'+
   '<div class="two"><div><label>Overs per innings (max 10)</label><select id="overs">'+[1,2,3,4,5,6,7,8,9,10].map(function(n){return '<option'+(n===6?' selected':'')+'>'+n+'</option>'}).join('')+'</select></div>'+
@@ -777,9 +791,9 @@ function renderT(){
     h+='<button class="btn sec" id="nreg" style="margin-top:10px">'+(T.registration==='open'?'Create new link (disables the old one)':'Create registration link')+'</button>';
     var pend=T.pendingTeams||[];
     h+='<h1>Waiting for approval ('+pend.length+')</h1>';
-    h+=pend.length?pend.map(function(tm){return '<div class="preg"><b class="fire">'+esc(tm.name)+'</b><div style="margin-top:2px">'+tm.players.map(function(p){return '<div class="plrow"><span class="pn">'+esc(p.name)+'</span><span class="mut pdp">'+(p.dept?esc(p.dept):'—')+'</span><span class="mut pid">'+(p.empId?'ID: '+esc(p.empId):'')+'</span></div>'}).join('')+'</div><div class="pregrow"><button class="btn pri" data-tap="'+esc(tm.id)+'">Approve</button><button class="btn sec" data-trm="'+esc(tm.id)+'">Remove</button></div></div>'}).join(''):'<div class="mut">No teams waiting.</div>';
+    h+=pend.length?pend.map(function(tm){return '<div class="preg"><b class="fire">'+esc(tm.name)+'</b><div style="margin-top:2px">'+tm.players.map(function(p,pi2){return '<div class="plrow"><span class="pn">'+esc(p.name)+'</span><span class="mut pdp">'+(p.dept?esc(p.dept):'—')+'</span><span class="mut pid">'+(p.empId?'ID: '+esc(p.empId):'')+'</span><button class="rlbtn sm'+(p.role==='c'?' on':'')+'" data-rlm="'+esc(tm.id)+':'+pi2+':c">C</button><button class="rlbtn sm'+(p.role==='vc'?' on':'')+'" data-rlm="'+esc(tm.id)+':'+pi2+':vc">VC</button></div>'}).join('')+'</div><div class="pregrow"><button class="btn pri" data-tap="'+esc(tm.id)+'">Approve</button><button class="btn sec" data-trm="'+esc(tm.id)+'">Remove</button></div></div>'}).join(''):'<div class="mut">No teams waiting.</div>';
     var tapp=T.approvedTeams||[];
-    if(tapp.length){h+='<h1>Approved teams &amp; player details (only you see this)</h1>'+tapp.map(function(tm){return '<div class="preg"><b class="fire">'+esc(tm.name)+'</b><div style="margin-top:2px">'+tm.players.map(function(p){return '<div class="plrow"><span class="pn">'+esc(p.name)+'</span><span class="mut pdp">'+(p.dept?esc(p.dept):'—')+'</span><span class="mut pid">'+(p.empId?'ID: '+esc(p.empId):'')+'</span></div>'}).join('')+'</div></div>'}).join('')}
+    if(tapp.length){h+='<h1>Approved teams &amp; player details (only you see this)</h1>'+tapp.map(function(tm){return '<div class="preg"><b class="fire">'+esc(tm.name)+'</b><div style="margin-top:2px">'+tm.players.map(function(p,pi2){return '<div class="plrow"><span class="pn">'+esc(p.name)+'</span><span class="mut pdp">'+(p.dept?esc(p.dept):'—')+'</span><span class="mut pid">'+(p.empId?'ID: '+esc(p.empId):'')+'</span><button class="rlbtn sm'+(p.role==='c'?' on':'')+'" data-rlm="'+esc(tm.id)+':'+pi2+':c">C</button><button class="rlbtn sm'+(p.role==='vc'?' on':'')+'" data-rlm="'+esc(tm.id)+':'+pi2+':vc">VC</button></div>'}).join('')+'</div></div>'}).join('')}
     h+='</div>';
   }
   if(own)h+='<button class="btn pri" id="addm" style="margin-top:6px">Add a match</button><button class="btn sec" id="tgl" style="margin-top:10px">'+(T.listed?'Hide from home Viewer tab':'Show on home Viewer tab')+'</button><div class="mut" style="font-size:12.5px;margin-top:6px">'+(T.listed?'On: anyone who opens the app or website sees live scores for this tournament on the home Viewer tab.':'Off: only people with the calendar link can find this tournament. Turn this on so viewers see scores from the home Viewer tab, no link needed.')+'</div><button class="btn sec" id="dltb" style="margin-top:10px">Download tournament backup (file)</button><button class="btn sec" id="corg" style="margin-top:10px">Copy private organiser link</button><div class="mut" style="font-size:12.5px;margin-top:6px">The organiser link opens owner controls on another device, like the Android app. Keep it private: anyone with it can manage this calendar.</div>';
@@ -803,6 +817,7 @@ function renderT(){
   var cr=document.getElementById('creg');if(cr&&own&&own.regKey)cr.onclick=function(){copyTxt(location.origin+'/r/'+id+'#r='+own.regKey)};
   Array.prototype.forEach.call(document.querySelectorAll('[data-tap]'),function(b){b.onclick=function(){b.disabled=true;api('POST','/api/tournaments/'+id+'/teams/'+b.dataset.tap,{action:'approve'},own.key).then(function(r){b.disabled=false;if(!r.ok){toast(r.j.error||'Could not approve');return}toast('Team approved',1);loadT(true)}).catch(function(){b.disabled=false;toast('No connection. Try again.')})}});
   Array.prototype.forEach.call(document.querySelectorAll('[data-trm]'),function(b){b.onclick=function(){if(!confirm('Remove this team?'))return;api('POST','/api/tournaments/'+id+'/teams/'+b.dataset.trm,{action:'remove'},own.key).then(function(r){if(!r.ok){toast(r.j.error||'Could not remove');return}toast('Team removed',1);loadT(true)}).catch(function(){toast('No connection. Try again.')})}});
+  Array.prototype.forEach.call(document.querySelectorAll('[data-rlm]'),function(b){b.onclick=function(){var pr=b.getAttribute('data-rlm').split(':');b.disabled=true;api('POST','/api/tournaments/'+id+'/teams/'+pr[0],{action:'role',player:+pr[1],role:pr[2]},own.key).then(function(r){b.disabled=false;if(!r.ok){toast(r.j.error||'Could not update');return}loadT(true)}).catch(function(){b.disabled=false;toast('No connection. Try again.')})}});
   var cg=document.getElementById('corg');if(cg&&own)cg.onclick=function(){copyTxt(location.origin+'/t/'+id+'#o='+own.key)};
 }
 function videoCard(){
@@ -1100,12 +1115,12 @@ function regPage(){
   fetch('/api/tournaments/'+id).then(function(r){return r.json().then(function(j){return{ok:r.ok,j:j}})}).then(function(r){
     if(!r.ok){app.innerHTML=top+'<div class="warn" style="margin-top:30px">Tournament not found.</div>'+FOOT;return}
     var name=r.j.name;
-    var prows='';for(var pi=0;pi<15;pi++)prows+='<div class="prow"><input class="rpname" maxlength="24" placeholder="Player '+(pi+1)+' name"><input class="rpemp" maxlength="24" placeholder="Employee ID"><input class="rpdep" maxlength="24" placeholder="Dept (optional)"></div>';
+    var prows='';for(var pi=0;pi<15;pi++)prows+='<div class="prow"><input class="rpname" maxlength="24" placeholder="Player '+(pi+1)+' name"><input class="rpemp" maxlength="24" placeholder="Employee ID"><input class="rpdep" maxlength="24" placeholder="Dept (optional)"><button type="button" class="rlbtn" data-rl="c" title="Captain">C</button><button type="button" class="rlbtn" data-rl="vc" title="Vice-captain">VC</button></div>';
     app.innerHTML=top+'<div class="hero wide"><h2 class="fire">'+esc(name)+'</h2><p>Team registration</p></div>'+
     '<div class="card"><div class="mut">Enter your team details. The organiser reviews every team before it shows in the app.</div>'+
     (rk?'':'<div class="warn" style="margin-top:8px">This link looks incomplete. Ask the organiser to share the full registration link again.</div>')+
     '<label>Team name</label><input id="rname" maxlength="24" placeholder="Your team name">'+
-    '<label>Players (2 to 15) - every player needs an employee ID; department is optional</label>'+prows+
+    '<label>Players (2 to 15) - every player needs an employee ID; department is optional. Tap C and VC to mark your captain and vice-captain.</label>'+prows+
     '<button class="btn pri" id="rgo" style="margin-top:14px">Submit team</button></div>'+FOOT;
     document.getElementById('rgo').onclick=function(){
       var b=this;b.disabled=true;
@@ -1116,15 +1131,22 @@ function regPage(){
         if(!pn&&!pe&&!pdp)continue;
         if(!pn){toast('Every player row needs a name');b.disabled=false;return}
         if(!pe){toast('Every player needs an employee ID');b.disabled=false;return}
-        players.push({name:pn,empId:pe,dept:pdp});
+        var rlb=rns[ri].closest('.prow').querySelector('.rlbtn.on');
+        players.push({name:pn,empId:pe,dept:pdp,role:rlb?rlb.getAttribute('data-rl'):''});
       }
       if(players.length<2){toast('Add at least 2 players');b.disabled=false;return}
+      if(!players.some(function(p){return p.role==='c'})){toast('Mark one player as captain (tap C)');b.disabled=false;return}
       api('POST','/api/tournaments/'+id+'/teams',{name:v('rname'),players:players},null,rk?{'x-reg-key':rk}:{}).then(function(rr){
         b.disabled=false;
         if(!rr.ok){toast(rr.j.error||'Could not submit');return}
         app.innerHTML=top+'<div class="hero wide"><h2 class="fire">'+esc(name)+'</h2><p>Team registration</p></div><div class="card"><b>Team submitted.</b><div class="mut" style="margin-top:6px">The organiser will review it before it shows in the app. You can close this page.</div></div>'+FOOT;
       }).catch(function(){b.disabled=false;toast('No connection. Try again.')});
     };
+    Array.prototype.forEach.call(document.querySelectorAll('.rlbtn'),function(rb){rb.onclick=function(){
+      var rl=rb.getAttribute('data-rl'),wasOn=rb.classList.contains('on');
+      Array.prototype.forEach.call(document.querySelectorAll('.rlbtn[data-rl="'+rl+'"]'),function(x){x.classList.remove('on')});
+      if(!wasOn){rb.classList.add('on');var other=rb.closest('.prow').querySelector('.rlbtn[data-rl="'+(rl==='c'?'vc':'c')+'"]');if(other)other.classList.remove('on')}
+    }});
   }).catch(function(){app.innerHTML=top+'<div class="warn" style="margin-top:30px">No connection. Try again.</div>'+FOOT});
 }
 
