@@ -209,8 +209,9 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 .lnflash{position:fixed;inset:0;z-index:65;background:radial-gradient(circle at 50% 38%,#fffbe8,#ffd45c66 45%,transparent 72%);animation:lnflash .75s ease-out forwards;pointer-events:none}
 @keyframes lnstar{0%,100%{opacity:0;transform:scale(.4) rotate(0deg)}50%{opacity:1;transform:scale(1.05) rotate(45deg)}}
 @keyframes lnflash{from{opacity:1}to{opacity:0}}
-.lnspinwrap{animation:lnspin 3s linear infinite;transform-style:preserve-3d}
+.lnspinwrap{animation:lnspin .8s ease-in-out 1.9s 2;transform-style:preserve-3d}
 @keyframes lnspin{from{transform:rotateY(0deg)}to{transform:rotateY(360deg)}}
+@keyframes lnzoomfill{0%{transform:scale(1)}26%{transform:scale(10)}58%{transform:scale(10)}100%{transform:scale(1)}}
 .lnov{position:fixed;inset:0;z-index:60;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:24px;overflow:hidden;background:radial-gradient(620px 500px at 50% -10%,#ffe9a6,transparent),radial-gradient(520px 520px at 108% 90%,#ffc7dd88,transparent),radial-gradient(520px 520px at -8% 95%,#c9a7ff66,transparent),#fff8e6}
 .lnaur{position:absolute;width:140vmax;height:140vmax;left:50%;top:50%;margin:-70vmax;border-radius:50%;filter:blur(60px);opacity:.5;pointer-events:none}
 .lnaur.a1{background:radial-gradient(circle at 30% 30%,#ffd45c88,transparent 60%);animation:lndrift 14s ease-in-out infinite alternate}
@@ -222,7 +223,7 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 .lnfloat{animation:lnfloat 3.2s ease-in-out infinite}
 .lnstart{margin:28px auto 0;max-width:300px;animation:lnbtnpulse 1.8s ease-in-out infinite}
 .lnpop{animation:lnpop .7s cubic-bezier(.2,1.4,.4,1) both}
-.lnbig{animation:lnbig .9s cubic-bezier(.2,1.5,.3,1) both}
+.lnbig{animation:lnbig .9s cubic-bezier(.2,1.5,.3,1) both,lnzoomfill 2.4s ease-in-out 3.7s both;position:relative;z-index:5}
 .lnglow{animation:lnglow 1.6s ease-in-out infinite alternate}
 .lnring{position:absolute;border:3px solid #ffb300;border-radius:50%;opacity:0;animation:lnring 1.4s ease-out infinite;pointer-events:none}
 .lnsun{position:absolute;inset:-70px;border-radius:50%;background:repeating-conic-gradient(from 0deg,#ffb30038 0deg 7deg,transparent 7deg 15deg);animation:lnsunrot 14s linear infinite;pointer-events:none;-webkit-mask-image:radial-gradient(circle,#000 0 62%,transparent 71%);mask-image:radial-gradient(circle,#000 0 62%,transparent 71%)}
@@ -377,15 +378,15 @@ function confetti(ms){
   function burst(x,y,n){for(var i=0;i<n;i++){var a=Math.random()*Math.PI*2,sp=(240+Math.random()*480)*d;mk(x,y,Math.cos(a)*sp,Math.sin(a)*sp-180*d)}}
   function rp(y){mk(Math.random()*W,y,(-60+Math.random()*120)*d,(150+Math.random()*210)*d)}
   function rain(n){for(var i=0;i<n;i++)rp(-Math.random()*H*.4+H*.25)}
-  burst(W/2,H*.42,280);burst(W*.22,H*.24,140);burst(W*.78,H*.27,140);cannon(0,Math.PI*-.38);cannon(W,Math.PI*-.62);rain(420);
-  setTimeout(function(){burst(W/2,H*.4,180);rain(110)},850);
+  burst(W/2,H*.42,280);burst(W*.22,H*.24,140);burst(W*.78,H*.27,140);cannon(0,Math.PI*-.38);cannon(W,Math.PI*-.62);rain(650);
+  setTimeout(function(){burst(W/2,H*.4,180);rain(200)},850);
   for(var ti=0;ti<26;ti++)P.push({t:'tw',x:Math.random()*W,y:Math.random()*H*.72,ph:Math.random()*6.3,c:golds[ti%golds.length]});
   var bursts=setInterval(fw,650);setTimeout(function(){clearInterval(bursts)},2700);
   var t0=Date.now(),lastSpawn=0;
   (function fr(){
     var now=Date.now(),el=now-t0;
     ctx.clearRect(0,0,W,H);
-    if(el<ms-600&&P.length<9000){var want=Math.max(1,Math.round((el-lastSpawn)/1000*1500));lastSpawn=el;for(var ri=0;ri<want;ri++){rp(-20-Math.random()*80);P[P.length-1].born=Date.now()-Math.random()*1500}}
+    if(P.length<12000){var rate=el<2000?3400:(el<ms-1800?330:0);if(rate>0){var want=Math.max(1,Math.round((el-lastSpawn)/1000*rate));lastSpawn=el;for(var ri=0;ri<want;ri++){rp(-20-Math.random()*80);P[P.length-1].born=Date.now()-Math.random()*1500}}}
     for(var k=P.length-1;k>=0;k--){var p=P[k],age=now-p.born,t=age/1000;
       if(p.t==='c'){
         var x=p.x0+p.vx*t*Math.exp(-.48*t),y=p.y0+p.vy*t+288*d*t*t;
@@ -424,10 +425,10 @@ function launchPage(){
     '<h2 style="font-size:52px;margin:4px 0 0"><span class="lnletter" style="animation-delay:.25s">K</span><span class="lnletter" style="animation-delay:.4s">C</span><span class="lnletter" style="animation-delay:.55s">L</span></h2>'+
     '<div class="lnpop" style="font-weight:900;color:#4a1d96;font-size:20px;animation-delay:.7s;letter-spacing:2px">KPD CRICKET LEAGUE</div>'+
     '<div class="lndiv"></div>'+
-    '<div class="lnpop lnfire" style="font-size:30px;font-weight:900;letter-spacing:1.5px;margin-top:16px;animation-delay:1.35s">THE KCL HAS BEGAN</div>'+
-    '<button class="btn pri lnstart lnpop" id="lnenter" style="animation-delay:1.9s">Enter the app</button>'+
+    '<div class="lnpop lnfire" style="font-size:30px;font-weight:900;letter-spacing:1.5px;margin-top:16px;animation-delay:6.2s">THE KCL HAS BEGAN</div>'+
+    '<button class="btn pri lnstart lnpop" id="lnenter" style="animation-delay:6.7s">Enter the app</button>'+
     '<div class="foot" style="margin-top:26px">Developed by <b>Anthony Dennis</b></div></div>';
-    if(!reduced)confetti(5200);
+    if(!reduced)confetti(7000);
     document.getElementById('lnenter').onclick=function(){location.href='/'};
   };
 }
