@@ -1161,7 +1161,7 @@ function wirePick(){
       [0,1].forEach(function(i){
         var pk=document.getElementById('pick'+i);if(!pk)return;
         pk.innerHTML=base+teams.map(function(tm,ix){return '<option value="'+ix+'">'+esc(tm.name)+'</option>'}).join('');
-        pk.onchange=function(){if(pk.value==='')return;var tm=teams[+pk.value];if(!tm)return;document.getElementById('t'+i).value=tm.name;document.getElementById('p'+i).value=tm.players.join('\n');toast(tm.name+' filled in',1)};
+        pk.onchange=function(){if(pk.value==='')return;var tm=teams[+pk.value];if(!tm)return;document.getElementById('t'+i).value=tm.name;document.getElementById('p'+i).value=tm.players.map(function(n){return n.replace(/ \((C|VC)\)$/,'')}).join('\n');toast(tm.name+' filled in',1)};
       });
     }).catch(function(){});
   };
