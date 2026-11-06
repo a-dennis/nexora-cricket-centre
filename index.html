@@ -698,7 +698,7 @@ function renderOrgArea(area){
   });
   h+='<div class="lkgrp">Everyone</div>'+lkRow('Grand opening ceremony','/launch',{share:true});
   h+='</div>';
-  h+=matchCard()+tourInner();
+  h+=matchForm()+tourInner();
   area.innerHTML=h;
   wireMatch();wireTour();wirePick();refreshNames();
   document.getElementById('ogout').onclick=function(){var tok=orgSess();orgSetSess('');if(tok)api('POST','/api/auth/logout',{token:tok}).catch(function(){});renderOrg()};
@@ -788,7 +788,7 @@ function home(){
   wireApp();wireLink();wireRole();
   if(qt){var ob=document.querySelector('#rtabs button[data-r="org"]');if(ob)ob.click()}
 }
-function matchCard(){
+function matchForm(){
   var qt=window.homeQT||'',l=tList(),sid=qt||(l.length===1?l[0].id:'');
   return '<div style="margin-top:18px;border-top:1px solid #e3d294;padding-top:12px"><b>Create a match</b>'+
   '<label>Match title</label><input id="title" placeholder="e.g. Match 1" maxlength="50">'+
