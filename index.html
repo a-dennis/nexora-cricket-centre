@@ -1134,6 +1134,7 @@ function regPage(){
   fetch('/api/tournaments/'+id).then(function(r){return r.json().then(function(j){return{ok:r.ok,j:j}})}).then(function(r){
     if(!r.ok){app.innerHTML=top+'<div class="warn" style="margin-top:30px">Tournament not found.</div>'+FOOT;return}
     var name=r.j.name;
+    if(rk&&tList().some(function(t){return t.id===id}))tSetReg(id,rk);
     var prows='';for(var pi=0;pi<15;pi++)prows+='<div class="prow"><input class="rpname" maxlength="24" placeholder="Player '+(pi+1)+' name"><input class="rpemp" maxlength="24" placeholder="Employee ID"><input class="rpdep" maxlength="24" placeholder="Dept (optional)"><button type="button" class="rlbtn" data-rl="c" title="Captain">C</button><button type="button" class="rlbtn" data-rl="vc" title="Vice-captain">VC</button></div>';
     app.innerHTML=top+'<div class="hero wide"><h2 class="fire">'+esc(name)+'</h2><p>Team registration</p></div>'+
     '<div class="card"><div class="mut">Enter your team details. The organiser reviews every team before it shows in the app.</div>'+
