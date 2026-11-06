@@ -24,6 +24,18 @@ function makeStore() {
     const row = (r) => r && { id: r.id, config: r.config, events: r.events, keyHash: r.key_hash, rev: r.rev, updated: r.updated_at };
     return {
       kind: 'durable',
+      async replaceAllMatches(expected, fresh) {
+        await ready; const c = await pool.connect();
+        try {
+          await c.query('BEGIN'); await c.query('LOCK TABLE cricket_matches IN EXCLUSIVE MODE');
+          const rows = await c.query('SELECT * FROM cricket_matches ORDER BY id FOR UPDATE');
+          const actual = rows.rows.map(row);
+          if (matchSnapshot(actual) !== matchSnapshot(expected)) { await c.query('ROLLBACK'); return false; }
+          await c.query('DELETE FROM cricket_matches');
+          await c.query('INSERT INTO cricket_matches(id,config,events,key_hash) VALUES($1,$2,$3,$4)', [fresh.id, JSON.stringify(fresh.config), '[]', fresh.keyHash]);
+          await c.query('COMMIT'); return true;
+        } catch(e) { await c.query('ROLLBACK'); throw e; } finally { c.release(); }
+      },
       async get(id) { await ready; const r = await pool.query('SELECT * FROM cricket_matches WHERE id=$1', [id]); return row(r.rows[0]); },
       async count() { await ready; const r = await pool.query('SELECT count(*)::int AS n FROM cricket_matches'); return r.rows[0].n; },
       async create(m) { await ready; await pool.query('INSERT INTO cricket_matches(id,config,events,key_hash) VALUES($1,$2,$3,$4)', [m.id, JSON.stringify(m.config), '[]', m.keyHash]); },
@@ -65,6 +77,10 @@ function makeStore() {
   const save = () => { try { fs.writeFileSync(file + '.tmp', JSON.stringify(db)); fs.renameSync(file + '.tmp', file); } catch (e) { console.error('save failed', e.message); } };
   return {
     kind: 'temporary',
+    async replaceAllMatches(expected, fresh) {
+      if (matchSnapshot(Object.values(db)) !== matchSnapshot(expected)) return false;
+      db = { [fresh.id]: { id:fresh.id,config:fresh.config,events:[],keyHash:fresh.keyHash,rev:0,updated:new Date().toISOString() } }; save(); return true;
+    },
     async get(id) { const m = db[id]; return m ? JSON.parse(JSON.stringify(m)) : null; },
     async count() { return Object.keys(db).length; },
     async create(m) { db[m.id] = { id: m.id, config: m.config, events: [], keyHash: m.keyHash, rev: 0, updated: new Date().toISOString() }; save(); },
@@ -87,6 +103,8 @@ function makeStore() {
     async update(id, events, expectRev) { const m = db[id]; if (!m || m.rev !== expectRev) return false; m.events = events; m.rev++; m.updated = new Date().toISOString(); save(); return true; },
   };
 }
+function stableValue(x) { if (Array.isArray(x)) return x.map(stableValue); if(x && typeof x==='object') return Object.keys(x).sort().reduce((a,k)=>(a[k]=stableValue(x[k]),a),{}); return x; }
+function matchSnapshot(ms) { return JSON.stringify(stableValue(ms.map(m=>({id:m.id,config:m.config,events:m.events,keyHash:m.keyHash,rev:m.rev})).sort((a,b)=>a.id.localeCompare(b.id)))); }
 const store = makeStore();
 
 // ---------- helpers ----------
@@ -261,7 +279,7 @@ async function handle(req, res) {
     return send(res, 200, { ok: true });
   }
   let mt;
-  if (p === '/api/backup' || p === '/api/restore' || p === '/api/admin/tournament-name' || p === '/api/admin/tournament-listed') {
+  if (p === '/api/backup' || p === '/api/restore' || p === '/api/admin/tournament-name' || p === '/api/admin/tournament-listed' || p === '/api/admin/replace-matches') {
     // Owner-only. Disabled unless BACKUP_TOKEN is set. Backups contain match data and hashed keys, never raw keys.
     const tok = process.env.BACKUP_TOKEN;
     if (!tok || tok.length < 24) return send(res, 404, { error: 'Unknown API' });
@@ -272,6 +290,18 @@ async function handle(req, res) {
       const [ms, ts] = [await store.allMatches(), await store.allTournaments()];
       return send(res, 200, { format: 'cricket-backup', version: 1, exportedAt: new Date().toISOString(), storage: store.kind,
         counts: { matches: ms.length, tournaments: ts.length }, tournaments: ts, matches: ms });
+    }
+    if (p === '/api/admin/replace-matches' && req.method === 'POST') {
+      const body = await readBody(req, 5e6);
+      if (!body || body.confirm !== 'replace-backed-up-matches' || !Array.isArray(body.expected) || body.expected.length > MAX_MATCHES) return send(res,400,{error:'Need exact backed-up match snapshot'});
+      const source = body.expected.find(m=>m.id===body.ceremonySource);
+      const ninja = engine.ninjaViewUrl(body.ninjaView);
+      if (!source || !source.config || !ninja) return send(res,400,{error:'Need backed-up ceremony and receiving-only viewing URL'});
+      const config = Object.assign({},source.config,{ninjaView:ninja}); delete config.videoId;
+      try { engine.replay(config,[]); } catch(e) { return send(res,400,{error:'Invalid ceremony setup'}); }
+      const id=rnd(8).toLowerCase(),key=rnd(14);
+      if (!(await store.replaceAllMatches(body.expected,{id,config,keyHash:sha(key)}))) return send(res,409,{error:'Matches changed since backup. No matches removed. Back up again.'});
+      return send(res,200,{ok:true,removed:body.expected.length,id,scorerKey:key,viewerPath:'/m/'+id,scorerPath:'/s/'+id});
     }
     if (p === '/api/admin/tournament-name' && req.method === 'POST') {
       const body = await readBody(req, 2e3);
