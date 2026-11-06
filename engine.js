@@ -4,6 +4,19 @@ const KINDS_ANY = ['bowled', 'caught', 'lbw', 'stumped', 'runout', 'hitwicket', 
 
 function cleanName(s, max) { return String(s == null ? '' : s).replace(/[\u0000-\u001f<>]/g, '').trim().slice(0, max || 30); }
 
+// Accept only a VDO.Ninja receiving link, never capture/director/room controls.
+function ninjaViewUrl(raw) {
+  try {
+    const u = new URL(String(raw || '').trim());
+    if (u.protocol !== 'https:' || u.hostname !== 'vdo.ninja' || u.port || u.username || u.password || u.pathname !== '/' || u.hash) return '';
+    const id = u.searchParams.get('view');
+    if (!id || !/^[A-Za-z0-9_-]{3,128}$/.test(id) || u.searchParams.getAll('view').length !== 1) return '';
+    if (['push','room','director'].some(k=>u.searchParams.has(k))) return '';
+    const safe = new URL('https://vdo.ninja/');safe.searchParams.set('view',id);
+    const pw=u.searchParams.get('password');if(pw){if(pw.length>128)return '';safe.searchParams.set('password',pw);}
+    return safe.href;
+  } catch (_) { return ''; }
+}
 function normalizeConfig(c) {
   const err = (m) => { const e = new Error(m); e.user = true; throw e; };
   if (!c || typeof c !== 'object') err('Missing match setup');
@@ -32,6 +45,7 @@ function normalizeConfig(c) {
   };
   // Optional YouTube video id for the viewer page. Invalid ids are dropped silently so a restore never fails over a link.
   if (typeof c.videoId === 'string' && /^[A-Za-z0-9_-]{11}$/.test(c.videoId)) out.videoId = c.videoId;
+  const ninja = ninjaViewUrl(c.ninjaView); if (ninja) { out.ninjaView = ninja; delete out.videoId; }
   return out;
 }
 
@@ -246,4 +260,4 @@ function view(cfg, events) {
   };
 }
 
-module.exports = { normalizeConfig, replay, view, validate, needsOf, cleanName };
+module.exports = { ninjaViewUrl, normalizeConfig, replay, view, validate, needsOf, cleanName };
