@@ -698,10 +698,47 @@ function renderOrgArea(area){
   });
   h+='<div class="lkgrp">Everyone</div>'+lkRow('Grand opening ceremony','/launch',{share:true});
   h+='</div>';
+  h+=ninjaPreviewCard();
   h+=matchForm()+tourInner();
   area.innerHTML=h;
-  wireMatch();wireTour();wirePick();refreshNames();
+  wireMatch();wireTour();wirePick();refreshNames();wireNinjaPreview();
   document.getElementById('ogout').onclick=function(){var tok=orgSess();orgSetSess('');if(tok)api('POST','/api/auth/logout',{token:tok}).catch(function(){});renderOrg()};
+}
+/* Private camera preview: current page only; never saved to match data or browser storage. */
+function ninjaPreviewCard(){
+  return '<h1>Private camera preview</h1><div class="card"><b>Try one VDO.Ninja camera</b><div class="mut" style="margin-top:8px">Only on this organiser screen. This does not publish a match video or start a YouTube broadcast. Anyone who already has the camera link may still watch it.</div><label>VDO.Ninja VIEW link</label><input id="njlink" type="url" autocomplete="off" spellcheck="false" placeholder="https://vdo.ninja/?view=..."><div class="grid" style="grid-template-columns:1fr 1fr;margin-top:12px"><button class="btn pri" id="njopen">Open preview</button><button class="btn sec" id="njstop">Stop &amp; clear</button></div><div id="njstate" class="mut" role="status" style="margin-top:10px">Keep the camera phone page open and awake. Point it away from work documents and people who have not agreed to filming.</div><div id="njplayer" style="margin-top:12px"></div><div class="mut" style="font-size:12.5px;margin-top:8px">The link stays only in this open page, not in match data, backups or saved browser storage. Stop &amp; clear, signing out, changing tabs here or reloading closes this preview. Stop filming on the phone with its red hang-up button too. Android app playback still needs a device test.</div></div>';
+}
+function ninjaViewUrl(raw){
+  try{
+    var u=new URL(String(raw||'').trim());
+    if(u.protocol!=='https:'||u.hostname!=='vdo.ninja'||u.port||u.username||u.password||u.pathname!=='/'||u.hash)return '';
+    var id=u.searchParams.get('view');
+    if(!id||!/^[A-Za-z0-9_-]{3,128}$/.test(id)||u.searchParams.getAll('view').length!==1)return '';
+    if(u.searchParams.has('push')||u.searchParams.has('room')||u.searchParams.has('director'))return '';
+    var safe=new URL('https://vdo.ninja/');safe.searchParams.set('view',id);
+    var pw=u.searchParams.get('password');if(pw){if(pw.length>128)return '';safe.searchParams.set('password',pw)}
+    return safe.href;
+  }catch(e){return ''}
+}
+function wireNinjaPreview(){
+  var b=document.getElementById('njopen'),input=document.getElementById('njlink'),player=document.getElementById('njplayer'),state=document.getElementById('njstate');
+  if(!b||!input||!player)return;
+  function clear(){player.replaceChildren();input.value='';state.textContent='Preview stopped and link cleared on this page. Stop the camera phone too if finished.'}
+  document.getElementById('njstop').onclick=clear;
+  b.onclick=function(){
+    var url=ninjaViewUrl(input.value);if(!url){state.textContent='Paste the HTTPS vdo.ninja VIEW link from the camera phone, not its camera/push or room link.';return}
+    var tok=orgSess();if(!tok){clear();renderOrg();return}
+    b.disabled=true;state.textContent='Checking organiser sign-in...';
+    api('POST','/api/auth/check',{token:tok}).then(function(r){
+      b.disabled=false;if(!document.body.contains(player))return;
+      if(!r.ok||!r.j||!r.j.ok){clear();orgSetSess('');renderOrg();return}
+      player.replaceChildren();var f=document.createElement('iframe');
+      f.title='Private VDO.Ninja camera preview';f.referrerPolicy='no-referrer';f.allow='autoplay; fullscreen';f.allowFullscreen=true;
+      f.style.cssText='width:100%;aspect-ratio:16/9;border:0;border-radius:12px;background:#111';
+      f.src=url;player.appendChild(f);input.value='';
+      state.textContent='Preview opened on this device only. Tap Play if shown. A loading circle is not proof of a connected camera. No public match video has changed.';
+    }).catch(function(){b.disabled=false;state.textContent='Could not check sign-in. Try again when connected.'});
+  };
 }
 function viewPane(){
   var h='<b>Watching the scores?</b><span class="mut" id="vlead"></span><div id="vgrps">';
