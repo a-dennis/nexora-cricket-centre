@@ -432,7 +432,7 @@ function buildCardImage(S){
       if(i.bowling.length){
         if(!measure){ctx.font=F(700,13);ctx.fillStyle='#7a6a2d';ctx.fillText('BOWLING · '+fit(i.bowlName,200).toUpperCase(),16+PAD-6,y+8)}
         y+=18;
-        var bc=[W-PAD-220,W-PAD-160,W-PAD-100,W-PAD-50,W-PAD-16],bh=['O','M','R','W','ECON'];
+        var bc=[W-PAD-280,W-PAD-215,W-PAD-150,W-PAD-85,W-PAD-16],bh=['O','M','R','W','ECON'];
         if(!measure){ctx.font=F(700,13);bh.forEach(function(h2,j){var w2=ctx.measureText(h2).width;ctx.fillText(h2,bc[j]-w2,y+8)})}
         y+=16;
         i.bowling.forEach(function(b){
