@@ -1328,9 +1328,21 @@ function regPage(){
   }).catch(function(){app.innerHTML=top+'<div class="warn" style="margin-top:30px">No connection. Try again.</div>'+FOOT});
 }
 
+/* ---------- approved roster: public names only ---------- */
+function approvedRosterHtml(j){
+  var teams=Array.isArray(j.teams)?j.teams:[];
+  return '<div class="hero wide"><h2 class="fire">'+esc(j.name)+'</h2><p>Approved teams and players</p></div><div class="card"><div class="row"><b>'+teams.length+' approved team'+(teams.length===1?'':'s')+'</b><button class="btn sec sm" id="rorefresh">Refresh list</button></div><div class="mut" id="rostatus">Updated '+esc(new Date().toLocaleTimeString())+'. New registrations appear only after organiser approval. Updates every 15 seconds while this page is open.</div></div>'+ (teams.length?teams.map(function(t){return '<div class="card"><h2>'+esc(t.name)+'</h2><ol style="padding-left:24px;line-height:2">'+t.players.map(function(p){return '<li>'+esc(String(p).replace(/ \((C|VC)\)$/,''))+'</li>'}).join('')+'</ol></div>'}).join(''):'<div class="card">No approved teams yet.</div>');
+}
+function rosterPage(){
+  document.title='Approved teams and players | KCL';var loading=false;
+  function refresh(){if(loading||document.hidden)return;loading=true;fetch('/api/tournaments/'+id,{cache:'no-store'}).then(function(r){if(!r.ok)throw Error('Unavailable');return r.json()}).then(function(j){app.innerHTML=approvedRosterHtml(j);document.getElementById('rorefresh').onclick=refresh}).catch(function(){var status=document.getElementById('rostatus');if(status)status.textContent='Could not refresh. The list below may be out of date. Tap Refresh list to retry.';else app.innerHTML='<div class="card"><b>Could not load the approved list.</b><button class="btn sec" id="rorefresh">Try again</button></div>';var b=document.getElementById('rorefresh');if(b)b.onclick=refresh}).finally(function(){loading=false})}
+  app.innerHTML='<div class="card">Loading approved teams...</div>';refresh();setInterval(refresh,15000);document.addEventListener('visibilitychange',function(){if(!document.hidden)refresh()});
+}
+
 /* ---------- boot ---------- */
 if(mode==='launch')launchPage();
 else if(mode==='home')home();
+else if(mode==='t'&&new URLSearchParams(location.search).get('roster')==='1'){rosterPage()}
 else if(mode==='t'){
   var om=location.hash.match(/o=([A-Za-z0-9]+)/);
   if(om){history.replaceState(null,'',location.pathname);fetch('/api/tournaments/'+id).then(function(r){return r.json()}).then(function(j){if(j&&j.name){tSave({id:id,name:j.name,key:om[1]});renderT()}})}
