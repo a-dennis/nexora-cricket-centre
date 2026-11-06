@@ -656,13 +656,13 @@ function renderOrg(){
         area.innerHTML='<span class="mut">First time here: set the password for this organiser area. It protects every tournament link and control on this screen.</span>'+
         (l.length?'':'<div class="warn" style="margin-top:8px">Open your private organiser link on this device first, then come back to set the password.</div>')+
         '<label>Username</label><input id="ogu" value="denny" maxlength="24" autocomplete="username">'+
-        '<label>Choose a password (8+ characters)</label><input id="ogp" type="password" autocomplete="new-password">'+
+        '<label>Choose a password (4+ characters)</label><input id="ogp" type="password" autocomplete="new-password">'+
         '<label>Password again</label><input id="ogp2" type="password" autocomplete="new-password">'+
         (l.length?'<button class="btn pri" id="ogset" style="margin-top:12px">Set password</button>':'');
         var sb=document.getElementById('ogset');
         if(sb)sb.onclick=function(){
           var b=this,pw=v('ogp');
-          if(pw.length<8){toast('Password needs at least 8 characters');return}
+          if(pw.length<4){toast('Password needs at least 4 characters');return}
           if(pw!==v('ogp2')){toast('Passwords do not match');return}
           var t=tList()[0];b.disabled=true;
           api('POST','/api/auth/setup',{tid:t.id,orgKey:t.key,password:pw}).then(function(r){
