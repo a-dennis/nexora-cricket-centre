@@ -306,13 +306,16 @@ var app=document.getElementById('app');
 var path=location.pathname;
 var mm=path.match(/^\/(m|s|t|r)\/([a-z0-9]+)/);
 var mode=mm?mm[1]:(path.replace(/\/+$/,'')==='/launch'?'launch':'home'), id=mm?mm[2]:null;
+var orgScoring=false;
+function scoringHeaders(){var own=tList().filter(function(t){return t.id==='whxrz4tw'})[0];return orgScoring&&own?{'x-org-key':own.key,'x-org-session':orgSess()}:{};}
+function hasScoring(){return !!key||orgScoring;}
 var S=null, T=null, ym=null, selDay=null, key=null, tab='live', busy=false, extra='', sheet=null, lastOk=0, err=null, polling=null, info={storage:'?'};
 function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
 function ini(n){var w=String(n).trim().split(/\s+/);return (w.length>1?w[0][0]+w[1][0]:String(n).slice(0,2)).toUpperCase()}
 function toast(m,ok){var t=document.createElement('div');t.className='toast'+(ok?' ok':'');t.textContent=m;document.body.appendChild(t);setTimeout(function(){t.remove()},2600)}
 var FOOT='<div class="foot">Developed by <b>Anthony Dennis</b></div>';
 function api(method,url,body,orgKey,hdrs){
-  return fetch(url,{method:method,headers:Object.assign({'content-type':'application/json'},key?{'x-scorer-key':key}:{},orgKey?{'x-org-key':orgKey}:{},hdrs||{}),body:body?JSON.stringify(body):undefined}).then(function(r){return r.json().then(function(j){return {ok:r.ok,status:r.status,j:j}})});
+  return fetch(url,{method:method,headers:Object.assign({'content-type':'application/json'},key?{'x-scorer-key':key}:{},scoringHeaders(),orgKey?{'x-org-key':orgKey}:{},hdrs||{}),body:body?JSON.stringify(body):undefined}).then(function(r){return r.json().then(function(j){return {ok:r.ok,status:r.status,j:j}})});
 }
 function chipCls(t){if(/^\d*W$/.test(t))return'bw';if(t==='4')return'b4';if(t==='6')return'b6';if(/Wd|Nb|B$|Lb$/.test(t))return'bx';if(t==='0')return'b0';return''}
 function chips(arr,pad){var h='';arr.forEach(function(t){h+='<div class="ball '+chipCls(t)+'">'+esc(t==='0'?'·':t)+'</div>'});for(var i=arr.length;i<(pad||0);i++)h+='<div class="ball bn">·</div>';return h}
@@ -589,7 +592,7 @@ function downloadImage(){
   },'image/png');
 }
 
-document.addEventListener('click',function(e){if(e.target&&e.target.id==='dlrep')downloadReport();if(e.target&&e.target.id==='dlimg')downloadImage();if(e.target&&e.target.id==='dlbk')dlBackup('/api/matches/'+id+'/backup',{'x-scorer-key':key},'match-backup-'+id);if(e.target&&e.target.id==='dltb'){var o=tList().filter(function(t){return t.id===id})[0];if(o)dlBackup('/api/tournaments/'+id+'/backup',{'x-org-key':o.key},'tournament-backup-'+id)}});
+document.addEventListener('click',function(e){if(e.target&&e.target.id==='dlrep')downloadReport();if(e.target&&e.target.id==='dlimg')downloadImage();if(e.target&&e.target.id==='dlbk')dlBackup('/api/matches/'+id+'/backup',Object.assign({'x-scorer-key':key||''},scoringHeaders()),'match-backup-'+id);if(e.target&&e.target.id==='dltb'){var o=tList().filter(function(t){return t.id===id})[0];if(o)dlBackup('/api/tournaments/'+id+'/backup',{'x-org-key':o.key},'tournament-backup-'+id)}});
 function dlBackup(url,hd,nm){
   fetch(url,{headers:hd}).then(function(r){return r.json().then(function(j){if(!r.ok){toast(j.error||'Could not download');return}
     var b=new Blob([JSON.stringify(j,null,1)],{type:'application/json'}),a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=nm+'-'+todayStr()+'.json';document.body.appendChild(a);a.click();setTimeout(function(){URL.revokeObjectURL(a.href);a.remove()},1500);toast('Backup downloaded',1)})},function(){toast('Network problem. Try again.')});
@@ -695,6 +698,7 @@ function renderOrgArea(area){
     h+=lkRow('Live scores & calendar','/t/'+t.id,{share:true});
     if(t.own&&t.regKey)h+=lkRow('Captain team entry','/r/'+t.id+'#r='+t.regKey,{share:true});
     if(t.own)h+=lkRow('Organiser controls (keep private)','/t/'+t.id+'#o='+t.key,{noOpen:true});
+    if(t.own&&t.id==='whxrz4tw')h+='<a class="btn sec" style="margin-top:10px;text-decoration:none" href="/s/49asxecn">Open Ceremonial Match scorer</a>';
   });
   h+='<div class="lkgrp">Everyone</div>'+lkRow('Grand opening ceremony','/launch',{share:true});
   h+='</div>';
@@ -812,6 +816,7 @@ function homeLinksCard(){
     h+=lkRow('Live scores & calendar','/t/'+t.id,{share:true});
     if(t.own&&t.regKey)h+=lkRow('Captain team entry','/r/'+t.id+'#r='+t.regKey,{share:true});
     if(t.own)h+=lkRow('Organiser controls (keep private)','/t/'+t.id+'#o='+t.key,{noOpen:true});
+    if(t.own&&t.id==='whxrz4tw')h+='<a class="btn sec" style="margin-top:10px;text-decoration:none" href="/s/49asxecn">Open Ceremonial Match scorer</a>';
   });
   h+='<div class="lkgrp">Everyone</div>'+lkRow('Grand opening ceremony','/launch',{share:true});
   h+='</div></div>';
@@ -951,6 +956,7 @@ function renderT(){
     if(T.registration==='open'&&ownL.regKey)h+=lkRow('Captain team entry','/r/'+id+'#r='+ownL.regKey,{share:true});
     else if(T.registration==='open')h+='<div class="mut" style="margin-top:8px;font-size:12.5px">Captain registration is open, but its link is saved on the device that created it. You can make a new one under Team registrations below.</div>';
     else h+='<div class="mut" style="margin-top:8px;font-size:12.5px">Captain registration link not created yet - make one under Team registrations below.</div>';
+    if(id==='whxrz4tw'&&(T.matches||[]).some(function(m){return m.id==='49asxecn'}))h+='<a class="btn sec" style="margin-top:10px;text-decoration:none" href="/s/49asxecn">Open Ceremonial Match scorer</a><div class="mut" style="font-size:12px;margin-top:6px">Requires Organiser sign-in on this organiser device.</div>';
     var sks=(T.matches||[]).map(function(m){var k=null;try{k=localStorage.getItem('ck_'+m.id)}catch(e){}return k?{id:m.id,title:m.title,key:k}:null}).filter(Boolean);
     if(sks.length)h+=sks.map(function(s){return lkRow('Scorer link - '+s.title,'/m/'+s.id+'#k='+s.key)}).join('');
     else h+='<div class="mut" style="margin-top:8px;font-size:12.5px">Scorer links are saved on the device that created each match - a new match shows its scorer link once, at creation.</div>';
@@ -994,7 +1000,7 @@ function renderT(){
   Array.prototype.forEach.call(document.querySelectorAll('[data-rlm]'),function(b){b.onclick=function(){var pr=b.getAttribute('data-rlm').split(':');b.disabled=true;api('POST','/api/tournaments/'+id+'/teams/'+pr[0],{action:'role',player:+pr[1],role:pr[2]},own.key).then(function(r){b.disabled=false;if(!r.ok){toast(r.j.error||'Could not update');return}loadT(true)}).catch(function(){b.disabled=false;toast('No connection. Try again.')})}});
 }
 function videoCard(){
-  if(mode!=='s'||!S||!key)return'';
+  if(mode!=='s'||!S||!hasScoring())return'';
   var ninja=S.config&&ninjaViewUrl(S.config.ninjaView),cv=ninja||((S.config&&S.config.videoId)?('https://www.youtube.com/watch?v='+S.config.videoId):'');
   return '<h1>Public match video</h1><div class="card"><label>Video source</label><select id="vidsource"><option value="youtube"'+(!ninja?' selected':'')+'>YouTube</option><option value="ninja"'+(ninja?' selected':'')+'>VDO.Ninja VIEW link</option></select><label>Viewing link</label><input id="vidu" type="url" autocomplete="off" placeholder="YouTube link or https://vdo.ninja/?view=..." value="'+esc(cv)+'"><div class="mut" style="font-size:12.5px;margin-top:6px">Saving publishes this viewing link to everyone opening this match. Only share an agreed camera feed. Never paste a camera/push, room or director link. One source at a time; saving replaces the previous public video. The private Organiser preview is separate.</div><div class="mut" style="font-size:12.5px;margin-top:8px">VDO.Ninja: keep the camera phone awake and connected. Each viewer can add upload load on the camera phone; test a small audience first. For a large audience, use YouTube. Clear the public link when finished and stop capture on the phone too.</div><div class="grid" style="grid-template-columns:1fr 1fr;margin-top:10px"><button class="btn sec" id="vidclr">Clear public video</button><button class="btn pri" id="vidsv">Publish viewing link</button></div></div>';
 }
@@ -1006,7 +1012,7 @@ document.addEventListener('click',function(e){
 });
 document.addEventListener('click',function(e){
   if(!e.target||(e.target.id!=='vidsv'&&e.target.id!=='vidclr'))return;
-  if(mode!=='s'||!S||!key)return;
+  if(mode!=='s'||!S||!hasScoring())return;
   var inp=document.getElementById('vidu');
   var val=e.target.id==='vidclr'?'':(inp?inp.value:'');
   api('POST','/api/matches/'+id+'/video',{video:val,source:document.getElementById('vidsource').value}).then(function(r){
@@ -1204,7 +1210,7 @@ function wire(){
 
 /* ---------- SCORER ---------- */
 function scorerPanel(){
-  if(!key)return '<div class="warn" style="margin-top:14px">This is a view-only link. Open the scorer link you were given to enter scores.</div>';
+  if(!hasScoring())return '<div class="warn" style="margin-top:14px">This is a view-only link. Open the scorer link you were given to enter scores.</div>';
   var st=S.state,i=cur();
   if(st.result)return '<div class="card"><div class="mut">Match finished. Use Undo if the last ball was a mistake.</div><div class="grid" style="grid-template-columns:1fr 1fr"><button class="btn small" id="undo">↶ Undo</button><button class="btn small" id="newm">New match</button></div></div>';
   var dis=busy||st.needs.length?' disabled':'';
@@ -1228,7 +1234,7 @@ function post(url,body){
 }
 function render0(){var b=document.querySelectorAll('.btn');Array.prototype.forEach.call(b,function(x){x.disabled=true})}
 document.addEventListener('click',function(e){
-  if(mode!=='s'||!S||!key)return;
+  if(mode!=='s'||!S||!hasScoring())return;
   var t=e.target.closest('button');if(!t)return;
   var r=t.getAttribute('data-r'),x=t.getAttribute('data-x');
   if(r!==null&&!t.closest('.sheet')){post('/event',{event:{t:'ball',r:+r,x:extra}});return}
@@ -1242,7 +1248,7 @@ function openSheet(html){closeSheet();var d=document.createElement('div');d.clas
 function closeSheet(){var s=document.getElementById('sheet');if(s)s.remove()}
 var needKey='';
 function openNeeds(){
-  var st=S.state;if(st.result||!st.needs.length||!key){closeSheet();needKey='';return}
+  var st=S.state;if(st.result||!st.needs.length||!hasScoring()){closeSheet();needKey='';return}
   var role=st.needs[0],i=cur(),k=role+':'+st.lastBall;
   if(needKey===k&&document.getElementById('sheet'))return;needKey=k;
   var title={striker:'Who is on strike?',non:'Who is the non-striker?',newbat:'New batter in',bowler:'Who is bowling the next over?'}[role];
@@ -1370,6 +1376,7 @@ else{
     try{if(m){localStorage.setItem('ck_'+id,m[1]);history.replaceState(null,'',location.pathname)}key=localStorage.getItem('ck_'+id)}catch(e){key=m?m[1]:null}
   }
   render();load(true);
+  if(mode==='s'&&id==='49asxecn'&&!key){var so=tList().filter(function(t){return t.id==='whxrz4tw'})[0];if(so&&orgSess())fetch('/api/matches/'+id+'/scoring-access',{headers:{'x-org-key':so.key,'x-org-session':orgSess()}}).then(function(r){return r.json().then(function(j){return r.ok&&j.ok})}).then(function(ok){if(ok){orgScoring=true;render()}}).catch(function(){});}
   setInterval(load,3000);setInterval(tickLabel,1000);
   document.addEventListener('visibilitychange',function(){if(!document.hidden)load()});
 }
