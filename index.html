@@ -190,6 +190,13 @@ label{color:#6d6791}
 .prow{display:flex;gap:8px;margin-bottom:8px;align-items:center}
 .rlbtn{flex:none;padding:4px 9px;border-radius:999px;border:1.5px solid #d4a017;background:#fff;color:#8a6d00;font-weight:800;font-size:11.5px;cursor:pointer;font-family:inherit}
 .rlbtn.on{background:linear-gradient(135deg,#ffd45c,#e8a90c);color:#4a2f00;border-color:#c88f0a}
+.lkrow{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 2px;border-bottom:1px dashed rgba(160,120,40,.3)}
+.lkrow:last-child{border-bottom:0}
+.lkname{font-weight:600;font-size:14.5px}
+.lkbtns{display:flex;gap:6px;flex-shrink:0}
+.lkbtns .btn{padding:7px 12px;font-size:13px;margin-top:0;width:auto}
+.lkgrp{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:#8a6d1f;margin:14px 0 2px;font-weight:700}
+
 .rlbtn.sm{padding:2px 8px;font-size:10.5px;align-self:center}
 .prow .rpname{flex:3}
 .prow .rpemp{flex:2}
@@ -624,7 +631,7 @@ function fillViewerScores(){
       d.innerHTML='<b class="fire">'+esc(t.name||'Tournament')+'</b><div class="mut" style="margin-top:6px">Loading scores...</div>';
       grps.appendChild(d);
       var lk=document.getElementById('lkhome');
-      if(lk&&!document.getElementById('lkb-'+t.id)){var la=document.createElement('a');la.className='btn sec';la.id='lkb-'+t.id;la.style.marginTop='8px';la.style.textDecoration='none';la.href='/t/'+t.id;la.textContent=(t.name||'Tournament')+' - all links';lk.appendChild(la)}
+      if(lk&&!document.getElementById('lkg-'+t.id))lk.insertAdjacentHTML('beforeend','<div class="lkgrp" id="lkg-'+esc(t.id)+'">'+esc(t.name||'Tournament')+'</div>'+lkRow('Live scores & calendar','/t/'+t.id,{share:true}));
     });
     var gs=grps.querySelectorAll('.vgrp');
     if(lead)lead.textContent=gs.length?'Live scores and scorecards - tap a match to open it:':'';
@@ -646,12 +653,25 @@ function wireRole(){
   var bs=t.querySelectorAll('button');for(var i=0;i<bs.length;i++)(function(b){b.onclick=function(){set(b.getAttribute('data-r'))}})(bs[i]);
   set('view');
 }
+function lkRow(label,url,opts){
+  opts=opts||{};var full=location.origin+url;
+  return '<div class="lkrow"><span class="lkname">'+esc(label)+'</span><span class="lkbtns">'+
+    (opts.noOpen?'':'<button class="btn sec" data-lko="'+esc(url)+'">Open</button>')+
+    '<button class="btn sec" data-lkc="'+esc(full)+'">Copy</button>'+
+    (opts.share?'<button class="btn sec" data-lkh="'+esc(full)+'">Share</button>':'')+'</span></div>';
+}
 function homeLinksCard(){
   var seen={},items=[];
-  tList().forEach(function(t){if(t&&t.id&&!seen[t.id]){seen[t.id]=1;items.push({id:t.id,name:t.name})}});
+  tList().forEach(function(t){if(t&&t.id&&!seen[t.id]){seen[t.id]=1;items.push({id:t.id,name:t.name,own:true,regKey:t.regKey||'',key:t.key||''})}});
   knownTs().forEach(function(t){if(t&&t.id&&!seen[t.id]){seen[t.id]=1;items.push({id:t.id,name:t.name})}});
-  var h='<h1>All links in one spot</h1><div class="card"><div class="mut">Every link for your tournament - calendar and live scores, opening ceremony, captain registration and scorer links:</div><div id="lkhome">';
-  items.forEach(function(t){h+='<a class="btn sec" id="lkb-'+esc(t.id)+'" style="margin-top:8px;text-decoration:none" href="/t/'+esc(t.id)+'">'+esc(t.name)+' - all links</a>'});
+  var h='<h1>All links in one spot</h1><div class="card"><div class="mut">Tap Open to go straight there, or Copy to send it.</div><div id="lkhome">';
+  items.forEach(function(t){
+    h+='<div class="lkgrp" id="lkg-'+esc(t.id)+'">'+esc(t.name)+'</div>';
+    h+=lkRow('Live scores & calendar','/t/'+t.id,{share:true});
+    if(t.own&&t.regKey)h+=lkRow('Captain team entry','/r/'+t.id+'#r='+t.regKey,{share:true});
+    if(t.own)h+=lkRow('Organiser controls (keep private)','/t/'+t.id+'#o='+t.key,{noOpen:true});
+  });
+  h+='<div class="lkgrp">Everyone</div>'+lkRow('Grand opening ceremony','/launch',{share:true});
   h+='</div></div>';
   return h;
 }
@@ -761,17 +781,21 @@ function renderT(){
   var by={};T.matches.forEach(function(m){if(m.date)(by[m.date]=by[m.date]||[]).push(m)});
   var p=ym.split('-'),y=+p[0],mo=+p[1]-1,first=new Date(y,mo,1).getDay(),dim=new Date(y,mo+1,0).getDate(),today=todayStr();
   var h='<div class="top"><b class="brand"><i class="mark"></i>KCL (KPD Cricket League)</b><span></span></div><div class="hero wide"><h2 class="fire">'+esc(T.name)+'</h2><p>Pick a date to see its match scores.</p></div>';
-  h+='<h1>All links in one spot</h1><div class="card"><div class="mut">Share freely with everyone:</div><div class="grid" style="grid-template-columns:1fr 1fr;margin-top:8px"><button class="btn sec" id="lkcal">Copy calendar &amp; live scores</button><button class="btn sec" id="lkshr">Share</button></div><div style="margin-top:10px"><a href="/launch">\u2728 Grand opening ceremony</a> &middot; <a href="/">App home</a></div>';
+  h+='<h1>All links in one spot</h1><div class="card"><div class="mut">Tap Open to go straight there, or Copy to send it.</div>';
+  h+='<div class="lkgrp">Share freely with everyone</div>';
+  h+=lkRow('Live scores & calendar','/t/'+id,{share:true});
+  h+=lkRow('Grand opening ceremony','/launch',{share:true});
   var ownL=tList().filter(function(t){return t.id===id})[0];
   if(ownL){
-    h+='<div class="mut" style="margin-top:14px">Only you see these (organiser device):</div>';
-    if(T.registration==='open'&&ownL.regKey)h+='<button class="btn sec" id="lkreg" style="margin-top:8px">Copy captain registration link</button>';
+    h+='<div class="lkgrp">Only you see these (organiser device)</div>';
+    if(T.registration==='open'&&ownL.regKey)h+=lkRow('Captain team entry','/r/'+id+'#r='+ownL.regKey,{share:true});
     else if(T.registration==='open')h+='<div class="mut" style="margin-top:8px;font-size:12.5px">Captain registration is open, but its link is saved on the device that created it. You can make a new one under Team registrations below.</div>';
     else h+='<div class="mut" style="margin-top:8px;font-size:12.5px">Captain registration link not created yet - make one under Team registrations below.</div>';
-    var sks=(T.matches||[]).map(function(m){var k=null;try{k=localStorage.getItem('ck_'+m.id)}catch(e){}return k?{id:m.id,title:m.title}:null}).filter(Boolean);
-    if(sks.length)h+=sks.map(function(s){return '<button class="btn sec" data-lks="'+esc(s.id)+'" style="margin-top:8px">Copy scorer link - '+esc(s.title)+'</button>'}).join('');
+    var sks=(T.matches||[]).map(function(m){var k=null;try{k=localStorage.getItem('ck_'+m.id)}catch(e){}return k?{id:m.id,title:m.title,key:k}:null}).filter(Boolean);
+    if(sks.length)h+=sks.map(function(s){return lkRow('Scorer link - '+s.title,'/m/'+s.id+'#k='+s.key)}).join('');
     else h+='<div class="mut" style="margin-top:8px;font-size:12.5px">Scorer links are saved on the device that created each match - a new match shows its scorer link once, at creation.</div>';
-    h+='<button class="btn sec" id="lkorg" style="margin-top:8px">Copy private organiser link</button><div class="mut" style="font-size:12.5px;margin-top:6px">Keep the organiser and scorer links private - anyone with them can control the tournament. The registration link is the one to send captains.</div>';
+    h+=lkRow('Private organiser link','/t/'+id+'#o='+ownL.key,{noOpen:true});
+    h+='<div class="mut" style="font-size:12.5px;margin-top:6px">Keep the organiser and scorer links private - anyone with them can control the tournament. The registration link is the one to send captains.</div>';
   }
   h+='</div>';
   h+='<div class="tcal"><div class="tl"><div class="card"><div class="row" style="margin-bottom:10px"><button class="nav" id="pm" aria-label="Previous month">‹</button><b style="font-size:17px">'+MON[mo]+' '+y+'</b><button class="nav" id="nm" aria-label="Next month">›</button></div><div class="cal">';
@@ -779,14 +803,13 @@ function renderT(){
   for(var i=0;i<first;i++)h+='<div></div>';
   for(var d=1;d<=dim;d++){var ds=y+'-'+pad2(mo+1)+'-'+pad2(d),n=(by[ds]||[]).length;
     h+='<button class="day'+(n?' has':'')+(ds===selDay?' sel':'')+(ds===today?' today':'')+'" data-d="'+ds+'" aria-label="'+d+' '+MON[mo]+(n?', '+n+' match'+(n>1?'es':''):'')+'">'+d+(n?'<i>'+n+'</i>':'')+'</button>'}
-  h+='</div></div></div><div class="tr"><div class="card"><div class="mut">View-only calendar link. Share it with everyone.</div><div class="grid" style="grid-template-columns:1fr 1fr;margin-top:8px"><button class="btn sec" id="ctc">Copy link</button><button class="btn sec" id="cts">Share</button></div></div>';
+  h+='</div></div></div><div class="tr">';
   var list=selDay?(by[selDay]||[]):null,own=tList().filter(function(t){return t.id===id})[0];
   if(selDay){h+='<h1>'+niceDate(selDay)+'</h1>'+(list.length?list.map(matchCard).join(''):'<div class="card mut">No matches on this date.</div>')}
   else{var mm2=T.matches.filter(function(m){return m.date&&m.date.slice(0,7)===ym}).sort(function(a,b){return a.date<b.date?1:-1});h+='<h1>'+MON[mo]+' '+y+'</h1>'+(mm2.length?mm2.map(matchCard).join(''):'<div class="card mut">No matches this month.</div>')}
   if(T.teams&&T.teams.length){h+='<h1>Teams</h1>'+T.teams.map(function(tm){return '<div class="card"><b>'+esc(tm.name)+'</b><div class="mut" style="margin-top:4px">'+tm.players.map(esc).join(', ')+'</div></div>'}).join('')}
   if(own){
     h+='<h1>Team registrations</h1><div class="card"><div class="mut">Share one link with all team captains. Each captain enters their team name and players. You approve a team before it shows in the app.</div>';
-    if(T.registration==='open'&&own.regKey)h+='<div class="link" style="margin-top:8px">'+esc(location.origin+'/r/'+id+'#r='+own.regKey)+'</div><button class="btn sec" id="creg" style="margin-top:8px">Copy registration link</button>';
     if(T.registration==='open'&&!own.regKey)h+='<div class="mut" style="margin-top:8px">Registration is open. The link is on the device that created it, or make a new one here.</div>';
     h+='<button class="btn sec" id="nreg" style="margin-top:10px">'+(T.registration==='open'?'Create new link (disables the old one)':'Create registration link')+'</button>';
     var pend=T.pendingTeams||[];
@@ -796,17 +819,9 @@ function renderT(){
     if(tapp.length){h+='<h1>Approved teams &amp; player details (only you see this)</h1>'+tapp.map(function(tm){return '<div class="preg"><b class="fire">'+esc(tm.name)+'</b><div style="margin-top:2px">'+tm.players.map(function(p,pi2){return '<div class="plrow"><span class="pn">'+esc(p.name)+'</span><span class="mut pdp">'+(p.dept?esc(p.dept):'—')+'</span><span class="mut pid">'+(p.empId?'ID: '+esc(p.empId):'')+'</span><button class="rlbtn sm'+(p.role==='c'?' on':'')+'" data-rlm="'+esc(tm.id)+':'+pi2+':c">C</button><button class="rlbtn sm'+(p.role==='vc'?' on':'')+'" data-rlm="'+esc(tm.id)+':'+pi2+':vc">VC</button></div>'}).join('')+'</div></div>'}).join('')}
     h+='</div>';
   }
-  if(own)h+='<button class="btn pri" id="addm" style="margin-top:6px">Add a match</button><button class="btn sec" id="tgl" style="margin-top:10px">'+(T.listed?'Hide from home Viewer tab':'Show on home Viewer tab')+'</button><div class="mut" style="font-size:12.5px;margin-top:6px">'+(T.listed?'On: anyone who opens the app or website sees live scores for this tournament on the home Viewer tab.':'Off: only people with the calendar link can find this tournament. Turn this on so viewers see scores from the home Viewer tab, no link needed.')+'</div><button class="btn sec" id="dltb" style="margin-top:10px">Download tournament backup (file)</button><button class="btn sec" id="corg" style="margin-top:10px">Copy private organiser link</button><div class="mut" style="font-size:12.5px;margin-top:6px">The organiser link opens owner controls on another device, like the Android app. Keep it private: anyone with it can manage this calendar.</div>';
+  if(own)h+='<button class="btn pri" id="addm" style="margin-top:6px">Add a match</button><button class="btn sec" id="tgl" style="margin-top:10px">'+(T.listed?'Hide from home Viewer tab':'Show on home Viewer tab')+'</button><div class="mut" style="font-size:12.5px;margin-top:6px">'+(T.listed?'On: anyone who opens the app or website sees live scores for this tournament on the home Viewer tab.':'Off: only people with the calendar link can find this tournament. Turn this on so viewers see scores from the home Viewer tab, no link needed.')+'</div><button class="btn sec" id="dltb" style="margin-top:10px">Download tournament backup (file)</button>';
   h+='</div></div>'+FOOT;app.innerHTML=h;
   document.getElementById('pm').onclick=function(){shiftMonth(-1)};document.getElementById('nm').onclick=function(){shiftMonth(1)};
-  var cu2=location.origin+'/t/'+id,ctc=document.getElementById('ctc'),cts=document.getElementById('cts');
-  if(ctc)ctc.onclick=function(){copyTxt(cu2)};
-  if(cts)cts.onclick=function(){if(navigator.share)navigator.share({title:T.name,url:cu2}).catch(function(){});else copyTxt(cu2)};
-  var lkcal=document.getElementById('lkcal');if(lkcal)lkcal.onclick=function(){copyTxt(cu2)};
-  var lkshr=document.getElementById('lkshr');if(lkshr)lkshr.onclick=function(){if(navigator.share)navigator.share({title:T.name,url:cu2}).catch(function(){});else copyTxt(cu2)};
-  var lkreg=document.getElementById('lkreg');if(lkreg&&own&&own.regKey)lkreg.onclick=function(){copyTxt(location.origin+'/r/'+id+'#r='+own.regKey)};
-  var lkorg=document.getElementById('lkorg');if(lkorg&&own)lkorg.onclick=function(){copyTxt(location.origin+'/t/'+id+'#o='+own.key)};
-  Array.prototype.forEach.call(document.querySelectorAll('[data-lks]'),function(b){b.onclick=function(){var kk=null;try{kk=localStorage.getItem('ck_'+b.getAttribute('data-lks'))}catch(e){}if(kk)copyTxt(location.origin+'/m/'+b.getAttribute('data-lks')+'#k='+kk);else toast('That scorer link is not saved on this device')}});
   Array.prototype.forEach.call(document.querySelectorAll('.day'),function(b){b.onclick=function(){selDay=selDay===b.dataset.d?null:b.dataset.d;renderT()}});
   var a=document.getElementById('addm');if(a)a.onclick=function(){location.href='/?t='+id};
   var tg=document.getElementById('tgl');if(tg&&own)tg.onclick=function(){tg.disabled=true;api('POST','/api/tournaments/'+id+'/listed',{listed:!T.listed},own.key).then(function(r){tg.disabled=false;if(!r.ok){toast(r.j.error||'Could not update');return}T.listed=!T.listed;toast(T.listed?'Now showing on the home Viewer tab':'Hidden from the home Viewer tab',1);renderT()}).catch(function(){tg.disabled=false;toast('No connection. Try again.')})};
@@ -814,17 +829,21 @@ function renderT(){
     api('POST','/api/tournaments/'+id+'/reglink',{regKey:rk},own.key).then(function(r){nr.disabled=false;
       if(!r.ok){toast(r.j.error||'Could not create link');return}
       tSetReg(id,rk);loadT(true);toast('Registration link ready - copy and share it',1)}).catch(function(){nr.disabled=false;toast('No connection. Try again.')})};
-  var cr=document.getElementById('creg');if(cr&&own&&own.regKey)cr.onclick=function(){copyTxt(location.origin+'/r/'+id+'#r='+own.regKey)};
   Array.prototype.forEach.call(document.querySelectorAll('[data-tap]'),function(b){b.onclick=function(){b.disabled=true;api('POST','/api/tournaments/'+id+'/teams/'+b.dataset.tap,{action:'approve'},own.key).then(function(r){b.disabled=false;if(!r.ok){toast(r.j.error||'Could not approve');return}toast('Team approved',1);loadT(true)}).catch(function(){b.disabled=false;toast('No connection. Try again.')})}});
   Array.prototype.forEach.call(document.querySelectorAll('[data-trm]'),function(b){b.onclick=function(){if(!confirm('Remove this team?'))return;api('POST','/api/tournaments/'+id+'/teams/'+b.dataset.trm,{action:'remove'},own.key).then(function(r){if(!r.ok){toast(r.j.error||'Could not remove');return}toast('Team removed',1);loadT(true)}).catch(function(){toast('No connection. Try again.')})}});
   Array.prototype.forEach.call(document.querySelectorAll('[data-rlm]'),function(b){b.onclick=function(){var pr=b.getAttribute('data-rlm').split(':');b.disabled=true;api('POST','/api/tournaments/'+id+'/teams/'+pr[0],{action:'role',player:+pr[1],role:pr[2]},own.key).then(function(r){b.disabled=false;if(!r.ok){toast(r.j.error||'Could not update');return}loadT(true)}).catch(function(){b.disabled=false;toast('No connection. Try again.')})}});
-  var cg=document.getElementById('corg');if(cg&&own)cg.onclick=function(){copyTxt(location.origin+'/t/'+id+'#o='+own.key)};
 }
 function videoCard(){
   if(mode!=='s'||!S||!key)return'';
   var cv=(S.config&&S.config.videoId&&/^[A-Za-z0-9_-]{11}$/.test(S.config.videoId))?('https://www.youtube.com/watch?v='+S.config.videoId):'';
   return '<h1>Live video (YouTube)</h1><div class="card"><label>YouTube live link (optional)</label><input id="vidu" type="url" placeholder="https://www.youtube.com/live/..." value="'+esc(cv)+'"><div class="mut" style="font-size:12.5px;margin-top:6px">Start the stream in the YouTube app, copy its link, then paste it here. Viewers will see the video above the live score. Clear it after the match.</div><div class="grid" style="grid-template-columns:1fr 1fr;margin-top:10px"><button class="btn sec" id="vidclr">Clear</button><button class="btn pri" id="vidsv">Save video link</button></div></div>';
 }
+document.addEventListener('click',function(e){
+  var b=e.target&&e.target.closest?e.target.closest('[data-lko],[data-lkc],[data-lkh]'):null;if(!b)return;
+  if(b.hasAttribute('data-lko'))location.href=b.getAttribute('data-lko');
+  else if(b.hasAttribute('data-lkc'))copyTxt(b.getAttribute('data-lkc'));
+  else{if(navigator.share)navigator.share({title:'KCL (KPD Cricket League)',url:b.getAttribute('data-lkh')}).catch(function(){});else copyTxt(b.getAttribute('data-lkh'))}
+});
 document.addEventListener('click',function(e){
   if(!e.target||(e.target.id!=='vidsv'&&e.target.id!=='vidclr'))return;
   if(mode!=='s'||!S||!key)return;
