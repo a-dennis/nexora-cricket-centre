@@ -848,7 +848,7 @@ function wireMatch(){
     var lines=function(s){return document.getElementById(s).value.split('\n').map(function(x){return x.trim()}).filter(Boolean)};
     var ts=tList().filter(function(t){return t.id===v('tsel')})[0];
     api('POST','/api/matches',{date:v('date'),tournament:ts?ts.id:undefined,title:v('title'),overs:+v('overs'),batFirst:+v('first'),wideRun:+v('wd'),nbRun:+v('nb'),maxOversPerBowler:+v('mob'),demo:false,
-      teams:[{name:v('t0'),players:lines('p0')},{name:v('t1'),players:lines('p1')}]},ts?ts.key:null).then(function(r){
+      teams:[{name:v('t0'),players:lines('p0'),registrationId:document.getElementById('pick0').dataset.teamId||''},{name:v('t1'),players:lines('p1'),registrationId:document.getElementById('pick1').dataset.teamId||''}]},ts?ts.key:null).then(function(r){
       b.disabled=false;
       if(!r.ok){toast(r.j.error||'Could not create');return}
       showCreated(r.j);
@@ -929,10 +929,12 @@ function loadT(first){
   }).catch(function(){if(!T){err='No connection';renderT()}});
 }
 function shiftMonth(d){var p=ym.split('-'),y=+p[0],m=+p[1]-1+d;y+=Math.floor(m/12);m=((m%12)+12)%12;ym=y+'-'+pad2(m+1);selDay=null;renderT()}
+function teamNameLink(name,ref){return ref?'<a style="color:inherit;text-decoration:underline" href="/t/'+esc(ref.tournamentId)+'?roster=1&amp;team='+esc(ref.id)+'">'+esc(name)+'</a>':esc(name)}
+function scoreTeamLink(name){var ix=S.config.teams.findIndex(function(t){return t.name===name});return teamNameLink(name,ix>=0&&S.teamRefs?S.teamRefs[ix]:null)}
 function matchCard(m){
   var st=m.status==='live'?'<span class="stp lv"><i></i>LIVE</span>':m.status==='done'?'<span class="stp fin">RESULT</span>':'<span class="stp">UPCOMING</span>';
-  var rows=m.innings.length?m.innings.map(function(i){return '<div class="mrow"><span class="team"><em class="lg l'+(m.teams[0]===i.team?0:1)+'">'+esc(ini(i.team))+'</em><span>'+esc(i.team)+'</span></span><b>'+i.runs+'/'+i.wkts+' <small class="mut">('+esc(i.overs)+')</small></b></div>'}).join(''):'<div class="mrow"><span class="team"><em class="lg l0">'+esc(ini(m.teams[0]))+'</em><span>'+esc(m.teams[0])+'</span></span></div><div class="mrow"><span class="team"><em class="lg l1">'+esc(ini(m.teams[1]))+'</em><span>'+esc(m.teams[1])+'</span></span></div>';
-  return '<a class="mc '+(m.status==='live'?'liv':m.status==='done'?'don':'')+'" href="/m/'+esc(m.id)+'"><div class="row mtop"><span class="mut">'+esc(m.title)+(m.date?' · '+esc(niceDate(m.date)):'')+'</span>'+st+'</div>'+rows+(m.result?'<div class="stl win" style="margin-top:8px">'+esc(m.result)+'</div>':'')+'</a>';
+  var rows=m.innings.length?m.innings.map(function(i){return '<div class="mrow"><span class="team"><em class="lg l'+(m.teams[0]===i.team?0:1)+'">'+esc(ini(i.team))+'</em><span>'+teamNameLink(i.team,m.teamRefs&&m.teamRefs[m.teams.indexOf(i.team)])+'</span></span><b>'+i.runs+'/'+i.wkts+' <small class="mut">('+esc(i.overs)+')</small></b></div>'}).join(''):'<div class="mrow"><span class="team"><em class="lg l0">'+esc(ini(m.teams[0]))+'</em><span>'+teamNameLink(m.teams[0],m.teamRefs&&m.teamRefs[0])+'</span></span></div><div class="mrow"><span class="team"><em class="lg l1">'+esc(ini(m.teams[1]))+'</em><span>'+teamNameLink(m.teams[1],m.teamRefs&&m.teamRefs[1])+'</span></span></div>';
+  return '<div class="mc '+(m.status==='live'?'liv':m.status==='done'?'don':'')+'"><div class="row mtop"><a class="mut" href="/m/'+esc(m.id)+'">'+esc(m.title)+(m.date?' · '+esc(niceDate(m.date)):'')+'</a>'+st+'</div>'+rows+(m.result?'<div class="stl win" style="margin-top:8px">'+esc(m.result)+'</div>':'')+'</div>';
 }
 function renderT(){
   if(!T){app.innerHTML='<div class="top"><b class="brand"><i class="mark"></i>KCL (KPD Cricket League)</b><span></span></div>'+(err?'<div class="warn" style="margin-top:30px">'+esc(err)+'</div>':'<div class="mut" style="margin-top:40px;text-align:center">Loading calendar...<br>The free server may take up to a minute to wake up.</div>')+FOOT;return}
@@ -1045,7 +1047,7 @@ function load(first){
   fetch('/api/matches/'+id+(S&&!first?'?rev='+S.rev:'')).then(function(r){return r.json().then(function(j){return{ok:r.ok,j:j}})}).then(function(r){
     if(!r.ok){err=r.j.error||'Error';if(!S)render();return}
     err=null;lastOk=Date.now();
-    if(!r.j.unchanged){S=r.j;if(!sheetOpenLock())render()}else if(mode==='m'||mode==='s')tickLabel();
+    if(!r.j.unchanged){if(!r.j.teamRefs&&S&&S.teamRefs)r.j.teamRefs=S.teamRefs;S=r.j;if(!sheetOpenLock())render()}else if(mode==='m'||mode==='s')tickLabel();
   }).catch(function(){err='Offline, retrying...';tickLabel()});
 }
 function sheetOpenLock(){return sheet&&sheet.lock&&mode==='s'&&false}
@@ -1055,7 +1057,7 @@ function head(){
   var st=S.state,c=S.config;
   var pill=st.result?'<span class="stp fin">RESULT</span>':(st.innings.some(function(i){return i.balls>0})?'<span class="stp lv"><i></i>LIVE</span>':'<span class="stp">UPCOMING</span>');
   return '<div class="top"><span class="brand"><i class="mark"></i>KCL (KPD Cricket League)</span>'+(c.demo?'<span class="demo">SAMPLE / PRACTICE</span>':'<span></span>')+'</div>'+
-  '<div class="mh"><div class="row"><h2>'+esc(c.title)+'</h2>'+pill+'</div><div class="sub">'+esc(c.teams[0].name)+' v '+esc(c.teams[1].name)+' · '+c.overs+' overs a side'+(c.date?' · '+esc(niceDate(c.date)):'')+' · <span id="upd"></span></div></div>';
+  '<div class="mh"><div class="row"><h2>'+esc(c.title)+'</h2>'+pill+'</div><div class="sub">'+scoreTeamLink(c.teams[0].name)+' v '+scoreTeamLink(c.teams[1].name)+' · '+c.overs+' overs a side'+(c.date?' · '+esc(niceDate(c.date)):'')+' · <span id="upd"></span></div></div>';
 }
 function mini(){
   var st=S.state,c=S.config;
@@ -1075,7 +1077,7 @@ function statusLine(){
 function scoreCard(){
   var st=S.state,c=S.config,i=cur(),prev=st.cur===1?st.innings[0]:null;
   var row=function(t,inn,dim){
-    return '<div class="trw'+(dim?' dim':'')+'"><div class="team"><div class="logo l'+t+'">'+esc(ini(c.teams[t].name))+'</div><span>'+esc(c.teams[t].name)+(inn&&!st.result&&inn===i&&!inn.done?' <i class="bt">batting</i>':'')+'</span></div>'+
+    return '<div class="trw'+(dim?' dim':'')+'"><div class="team"><div class="logo l'+t+'">'+esc(ini(c.teams[t].name))+'</div><span>'+scoreTeamLink(c.teams[t].name)+(inn&&!st.result&&inn===i&&!inn.done?' <i class="bt">batting</i>':'')+'</span></div>'+
       (inn?'<div class="score">'+inn.runs+'<small>/'+inn.wkts+'</small><div class="ov">'+inn.overs+' / '+c.overs+' ov</div></div>':'<div class="yet">Yet to bat</div>')+'</div>';
   };
   var first=st.innings[0],second=st.innings[1],bf=first.bat,bs=1-bf;
@@ -1151,11 +1153,11 @@ function scorecardTab(){
   var h='';
   S.state.innings.forEach(function(i,n){
     if(!i.batting.length&&n>S.state.cur)return;
-    h+='<h1>'+esc(i.batName)+' · '+i.runs+'/'+i.wkts+' ('+i.overs+' ov)</h1><div class="card" style="padding:6px 18px"><table class="tbl"><tr><th>Batter</th><th>R</th><th>B</th><th>4s</th><th>6s</th><th>SR</th></tr>'+
+    h+='<h1>'+scoreTeamLink(i.batName)+' · '+i.runs+'/'+i.wkts+' ('+i.overs+' ov)</h1><div class="card" style="padding:6px 18px"><table class="tbl"><tr><th>Batter</th><th>R</th><th>B</th><th>4s</th><th>6s</th><th>SR</th></tr>'+
     i.batting.map(function(b){return '<tr><td><b>'+esc(b.name)+'</b><div class="sub">'+esc(b.notOut?'not out':b.out)+'</div></td><td><b>'+b.runs+'</b></td><td>'+b.balls+'</td><td>'+b.fours+'</td><td>'+b.sixes+'</td><td>'+b.sr+'</td></tr>'}).join('')+
     '<tr><td>Extras<div class="sub">wd '+i.extras.wd+', nb '+i.extras.nb+', b '+i.extras.b+', lb '+i.extras.lb+'</div></td><td><b>'+i.extrasTotal+'</b></td><td colspan="4"></td></tr></table>'+
     (i.yetToBat.length&&!i.done?'<div class="sub" style="padding:6px 0 10px">Yet to bat: '+esc(i.yetToBat.map(function(y){return y.name}).join(', '))+'</div>':'')+'</div>';
-    if(i.bowling.length)h+='<h1>Bowling · '+esc(i.bowlName)+'</h1><div class="card" style="padding:6px 18px"><table class="tbl"><tr><th>Bowler</th><th>O</th><th>M</th><th>R</th><th>W</th><th>Econ</th></tr>'+
+    if(i.bowling.length)h+='<h1>Bowling · '+scoreTeamLink(i.bowlName)+'</h1><div class="card" style="padding:6px 18px"><table class="tbl"><tr><th>Bowler</th><th>O</th><th>M</th><th>R</th><th>W</th><th>Econ</th></tr>'+
       i.bowling.map(function(b){return '<tr><td>'+esc(b.name)+'</td><td>'+b.overs+'</td><td>'+b.maidens+'</td><td>'+b.runs+'</td><td class="'+(b.wkts?'red':'')+'"><b>'+b.wkts+'</b></td><td>'+b.econ.toFixed(1)+'</td></tr>'}).join('')+'</table></div>';
     if(i.fow.length)h+='<div class="sub" style="margin:-4px 4px 10px">Fall of wickets: '+esc(i.fow.map(function(f){return f.runs+'/'+f.wkts+' ('+f.name+', '+f.over+' ov)'}).join(' · '))+'</div>';
   });
@@ -1277,7 +1279,7 @@ function wirePick(){
       [0,1].forEach(function(i){
         var pk=document.getElementById('pick'+i);if(!pk)return;
         pk.innerHTML=base+teams.map(function(tm,ix){return '<option value="'+ix+'">'+esc(tm.name)+'</option>'}).join('');
-        pk.onchange=function(){if(pk.value==='')return;var tm=teams[+pk.value];if(!tm)return;document.getElementById('t'+i).value=tm.name;document.getElementById('p'+i).value=tm.players.map(function(n){return n.replace(/ \((C|VC)\)$/,'')}).join('\n');toast(tm.name+' filled in',1)};
+        pk.onchange=function(){pk.dataset.teamId='';if(pk.value==='')return;var tm=teams[+pk.value];if(tm)pk.dataset.teamId=tm.id;if(!tm)return;document.getElementById('t'+i).value=tm.name;document.getElementById('p'+i).value=tm.players.map(function(n){return n.replace(/ \((C|VC)\)$/,'')}).join('\n');toast(tm.name+' filled in',1)};
       });
     }).catch(function(){});
   };
@@ -1330,12 +1332,12 @@ function regPage(){
 
 /* ---------- approved roster: public names only ---------- */
 function approvedRosterHtml(j){
-  var teams=Array.isArray(j.teams)?j.teams:[];
-  return '<div class="hero wide"><h2 class="fire">'+esc(j.name)+'</h2><p>Approved teams and players</p></div><div class="card"><div class="row"><b>'+teams.length+' approved team'+(teams.length===1?'':'s')+'</b><button class="btn sec sm" id="rorefresh">Refresh list</button></div><div class="mut" id="rostatus">Updated '+esc(new Date().toLocaleTimeString())+'. New registrations appear only after organiser approval. Updates every 15 seconds while this page is open.</div></div>'+ (teams.length?teams.map(function(t){return '<div class="card"><h2>'+esc(t.name)+'</h2><ol style="padding-left:24px;line-height:2">'+t.players.map(function(p){return '<li>'+esc(String(p).replace(/ \((C|VC)\)$/,''))+'</li>'}).join('')+'</ol></div>'}).join(''):'<div class="card">No approved teams yet.</div>');
+  var teams=Array.isArray(j.teams)?j.teams:[],selected=new URLSearchParams(location.search).get('team');if(selected)teams=teams.filter(function(t){return t.id===selected});
+  return '<div class="hero wide"><h2 class="fire">'+esc(j.name)+'</h2><p>Approved teams and player details</p></div><div class="card"><div class="row"><b>'+teams.length+' approved team'+(teams.length===1?'':'s')+'</b><button class="btn sec sm" id="rorefresh">Refresh list</button></div><div class="mut" id="rostatus">Updated '+esc(new Date().toLocaleTimeString())+'. New registrations appear only after organiser approval. Updates every 15 seconds while this page is open.</div></div>'+ (teams.length?teams.map(function(t){return '<div class="card"><h2>'+esc(t.name)+'</h2><ol style="padding-left:24px;line-height:2">'+t.players.map(function(p){return '<li style="margin-bottom:10px">'+esc(typeof p==='string'?p.replace(/ \((C|VC)\)$/,''):p.name)+(typeof p==='object'?'<div class="mut" style="font-size:13px;line-height:1.6;overflow-wrap:anywhere">Employee ID: '+esc(p.empId||'Not provided')+'<br>Department: '+esc(p.dept||'Not provided')+'</div>':'')+'</li>'}).join('')+'</ol></div>'}).join(''):'<div class="card">No approved teams yet.</div>');
 }
 function rosterPage(){
   document.title='Approved teams and players | KCL';var loading=false;
-  function refresh(){if(loading||document.hidden)return;loading=true;fetch('/api/tournaments/'+id,{cache:'no-store'}).then(function(r){if(!r.ok)throw Error('Unavailable');return r.json()}).then(function(j){app.innerHTML=approvedRosterHtml(j);document.getElementById('rorefresh').onclick=refresh}).catch(function(){var status=document.getElementById('rostatus');if(status)status.textContent='Could not refresh. The list below may be out of date. Tap Refresh list to retry.';else app.innerHTML='<div class="card"><b>Could not load the approved list.</b><button class="btn sec" id="rorefresh">Try again</button></div>';var b=document.getElementById('rorefresh');if(b)b.onclick=refresh}).finally(function(){loading=false})}
+  function refresh(){if(loading||document.hidden)return;loading=true;fetch('/api/tournaments/'+id+(id==='whxrz4tw'?'/team-details':''),{cache:'no-store'}).then(function(r){if(!r.ok)throw Error('Unavailable');return r.json()}).then(function(j){app.innerHTML=approvedRosterHtml(j);document.getElementById('rorefresh').onclick=refresh}).catch(function(){var status=document.getElementById('rostatus');if(status)status.textContent='Could not refresh. The list below may be out of date. Tap Refresh list to retry.';else app.innerHTML='<div class="card"><b>Could not load the approved list.</b><button class="btn sec" id="rorefresh">Try again</button></div>';var b=document.getElementById('rorefresh');if(b)b.onclick=refresh}).finally(function(){loading=false})}
   app.innerHTML='<div class="card">Loading approved teams...</div>';refresh();setInterval(refresh,15000);document.addEventListener('visibilitychange',function(){if(!document.hidden)refresh()});
 }
 
