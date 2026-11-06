@@ -20,6 +20,7 @@ function makeStore() {
       rev INTEGER NOT NULL DEFAULT 0, created_at TIMESTAMPTZ NOT NULL DEFAULT now(), updated_at TIMESTAMPTZ NOT NULL DEFAULT now())`);
     const tready = pool.query(`CREATE TABLE IF NOT EXISTS cricket_tournaments (
       id TEXT PRIMARY KEY, name TEXT NOT NULL, key_hash TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now())`).then(() => pool.query("ALTER TABLE cricket_tournaments ADD COLUMN IF NOT EXISTS teams JSONB NOT NULL DEFAULT '[]', ADD COLUMN IF NOT EXISTS reg_key_hash TEXT, ADD COLUMN IF NOT EXISTS listed BOOLEAN NOT NULL DEFAULT false"));
+    const sready = pool.query('CREATE TABLE IF NOT EXISTS cricket_settings (k TEXT PRIMARY KEY, v TEXT)');
     const row = (r) => r && { id: r.id, config: r.config, events: r.events, keyHash: r.key_hash, rev: r.rev, updated: r.updated_at };
     return {
       kind: 'durable',
@@ -30,6 +31,8 @@ function makeStore() {
       async tget(id) { await tready; const r = await pool.query('SELECT * FROM cricket_tournaments WHERE id=$1', [id]); const x = r.rows[0]; return x && { id: x.id, name: x.name, keyHash: x.key_hash, teams: Array.isArray(x.teams) ? x.teams : [], regKeyHash: x.reg_key_hash || null, listed: !!x.listed }; },
       async tsetTeams(id, teams) { await tready; await pool.query('UPDATE cricket_tournaments SET teams=$2 WHERE id=$1', [id, JSON.stringify(teams)]); },
       async tsetReg(id, regKeyHash) { await tready; await pool.query('UPDATE cricket_tournaments SET reg_key_hash=$2 WHERE id=$1', [id, regKeyHash]); },
+      async getSetting(k) { await sready; const r = await pool.query('SELECT v FROM cricket_settings WHERE k=$1', [k]); return r.rows[0] ? r.rows[0].v : null; },
+      async setSetting(k, v) { await sready; if (v === null) { await pool.query('DELETE FROM cricket_settings WHERE k=$1', [k]); return; } await pool.query('INSERT INTO cricket_settings(k,v) VALUES($1,$2) ON CONFLICT (k) DO UPDATE SET v=$2', [k, v]); },
       async tsetListed(id, listed) { await tready; const r = await pool.query('UPDATE cricket_tournaments SET listed=$2 WHERE id=$1', [id, !!listed]); return r.rowCount === 1; },
       async listedTournaments() { await tready; const r = await pool.query('SELECT id,name FROM cricket_tournaments WHERE listed ORDER BY created_at'); return r.rows.map((x) => ({ id: x.id, name: x.name })); },
       async trename(id, name) { await tready; const r = await pool.query('UPDATE cricket_tournaments SET name=$2 WHERE id=$1', [id, name]); return r.rowCount === 1; },
@@ -55,6 +58,10 @@ function makeStore() {
   let tdb = {};
   try { tdb = JSON.parse(fs.readFileSync(tfile, 'utf8')); } catch (e) { tdb = {}; }
   const tsave = () => { try { fs.writeFileSync(tfile + '.tmp', JSON.stringify(tdb)); fs.renameSync(tfile + '.tmp', tfile); } catch (e) { console.error('save failed', e.message); } };
+  const sfile = file + '.s.json';
+  let sdb = {};
+  try { sdb = JSON.parse(fs.readFileSync(sfile, 'utf8')); } catch (e) { sdb = {}; }
+  const ssave = () => { try { fs.writeFileSync(sfile + '.tmp', JSON.stringify(sdb)); fs.renameSync(sfile + '.tmp', sfile); } catch (e) { console.error('save failed', e.message); } };
   const save = () => { try { fs.writeFileSync(file + '.tmp', JSON.stringify(db)); fs.renameSync(file + '.tmp', file); } catch (e) { console.error('save failed', e.message); } };
   return {
     kind: 'temporary',
@@ -66,6 +73,8 @@ function makeStore() {
     async trename(id, name) { if (!tdb[id]) return false; tdb[id].name = name; tsave(); return true; },
     async tsetTeams(id, teams) { if (tdb[id]) { tdb[id].teams = teams; tsave(); } },
     async tsetReg(id, regKeyHash) { if (tdb[id]) { tdb[id].regKeyHash = regKeyHash; tsave(); } },
+    async getSetting(k) { return sdb[k] !== undefined ? sdb[k] : null; },
+    async setSetting(k, v) { if (v === null) { delete sdb[k]; } else { sdb[k] = v; } ssave(); },
     async tsetListed(id, listed) { if (!tdb[id]) return false; tdb[id].listed = !!listed; tsave(); return true; },
     async listedTournaments() { return Object.values(tdb).filter((t) => t.listed).map((t) => ({ id: t.id, name: t.name })); },
     async tcount() { return Object.keys(tdb).length; },
@@ -194,6 +203,52 @@ async function handle(req, res) {
   const p = url.pathname;
   if (p === '/healthz') return send(res, 200, { ok: true, storage: store.kind });
   if (p === '/api/info') return send(res, 200, { storage: store.kind });
+
+  // ---------- organiser sign-in for the main-screen organiser area ----------
+  if (p === '/api/auth/status' && req.method === 'GET') {
+    return send(res, 200, { setup: !!(await store.getSetting('orgpass')) });
+  }
+  if (p === '/api/auth/setup' && req.method === 'POST') {
+    const ip = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
+    if (badAuth(ip)) return send(res, 429, { error: 'Too many failed attempts. Try again later.' });
+    const body = await readBody(req, 2e3);
+    const tid = String((body && body.tid) || '');
+    const t = /^[a-z0-9]{6,12}$/.test(tid) ? await store.tget(tid) : null;
+    if (!t || !keyEq(body && body.orgKey, t.keyHash)) { noteBad(ip); return send(res, 403, { error: 'A valid organiser link on this device is needed to set the password' }); }
+    const pw = String((body && body.password) || '');
+    if (pw.length < 8 || pw.length > 72) return send(res, 400, { error: 'Password needs 8 to 72 characters' });
+    const salt = rnd(16);
+    const hash = crypto.scryptSync(pw, salt, 32).toString('hex');
+    await store.setSetting('orgpass', JSON.stringify({ salt, hash }));
+    return send(res, 200, { ok: true });
+  }
+  if (p === '/api/auth/login' && req.method === 'POST') {
+    const ip = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
+    if (badAuth(ip)) return send(res, 429, { error: 'Too many failed attempts. Try again later.' });
+    const body = await readBody(req, 2e3);
+    const rec = await store.getSetting('orgpass');
+    if (!rec) return send(res, 409, { error: 'Sign-in is not set up yet' });
+    let ph = null; try { ph = JSON.parse(rec); } catch (e) { ph = null; }
+    const user = String((body && body.user) || '').trim().toLowerCase();
+    const pw = String((body && body.password) || '');
+    const ok = !!(ph && user === 'denny' && pw.length > 0 && pw.length <= 72 &&
+      crypto.timingSafeEqual(Buffer.from(crypto.scryptSync(pw, ph.salt, 32).toString('hex')), Buffer.from(String(ph.hash))));
+    if (!ok) { noteBad(ip); return send(res, 403, { error: 'Wrong username or password' }); }
+    const token = rnd(24);
+    await store.setSetting('orgsess', JSON.stringify({ h: sha(token), exp: Date.now() + 30 * 864e5 }));
+    return send(res, 200, { ok: true, token });
+  }
+  if (p === '/api/auth/check' && req.method === 'POST') {
+    const body = await readBody(req, 2e3);
+    let sess = null; try { sess = JSON.parse((await store.getSetting('orgsess')) || 'null'); } catch (e) { sess = null; }
+    const tok = body && body.token;
+    const ok = !!(sess && typeof tok === 'string' && tok.length >= 16 && tok.length <= 64 && sess.exp > Date.now() && keyEq(tok, sess.h));
+    return send(res, 200, { ok });
+  }
+  if (p === '/api/auth/logout' && req.method === 'POST') {
+    await store.setSetting('orgsess', null);
+    return send(res, 200, { ok: true });
+  }
   let mt;
   if (p === '/api/backup' || p === '/api/restore' || p === '/api/admin/tournament-name' || p === '/api/admin/tournament-listed') {
     // Owner-only. Disabled unless BACKUP_TOKEN is set. Backups contain match data and hashed keys, never raw keys.
