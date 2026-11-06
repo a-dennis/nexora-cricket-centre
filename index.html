@@ -204,6 +204,7 @@ a{color:#0b6b9a}
 .stale{color:#b87400}
 button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline-color:#7a3cff}
 /* grand opening ceremony */
+.lnfx{position:fixed;inset:0;z-index:70;pointer-events:none}
 .lnov{position:fixed;inset:0;z-index:60;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:24px;overflow:hidden;background:radial-gradient(620px 500px at 50% -10%,#ffe9a6,transparent),radial-gradient(520px 520px at 108% 90%,#ffc7dd88,transparent),radial-gradient(520px 520px at -8% 95%,#c9a7ff66,transparent),#fff8e6}
 .lnaur{position:absolute;width:140vmax;height:140vmax;left:50%;top:50%;margin:-70vmax;border-radius:50%;filter:blur(60px);opacity:.5;pointer-events:none}
 .lnaur.a1{background:radial-gradient(circle at 30% 30%,#ffd45c88,transparent 60%);animation:lndrift 14s ease-in-out infinite alternate}
@@ -220,7 +221,7 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 .lnring{position:absolute;border:3px solid #ffb300;border-radius:50%;opacity:0;animation:lnring 1.4s ease-out infinite;pointer-events:none}
 .lnsun{position:absolute;inset:-70px;border-radius:50%;background:repeating-conic-gradient(from 0deg,#ffb30038 0deg 7deg,transparent 7deg 15deg);animation:lnsunrot 14s linear infinite;pointer-events:none;-webkit-mask-image:radial-gradient(circle,#000 0 62%,transparent 71%);mask-image:radial-gradient(circle,#000 0 62%,transparent 71%)}
 .lnfire{font-size:52px;margin:4px 0 0;background:linear-gradient(90deg,#c2185b,#e8590c 30%,#ffd45c 50%,#e8590c 70%,#c2185b);background-size:220% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;-webkit-text-fill-color:transparent;animation:lnshimmer 3s linear infinite}
-.lnletter{display:inline-block;animation:lnbig .8s cubic-bezier(.2,1.5,.3,1) both}
+.lnletter{display:inline-block;animation:lnbig .8s cubic-bezier(.2,1.5,.3,1) both;background:linear-gradient(180deg,#e8590c,#c2185b);-webkit-background-clip:text;background-clip:text;color:transparent;-webkit-text-fill-color:transparent}
 .lndiv{height:3px;width:0;margin:14px auto 0;border-radius:2px;background:linear-gradient(90deg,transparent,#ffb300,#ff5c8a,#ffb300,transparent);animation:lndiv .8s ease-out .95s forwards}
 .lnspk{position:absolute;width:7px;height:7px;border-radius:50%;background:#ffd45c;box-shadow:0 0 10px 2px #ffb30088;opacity:0;animation:lnspk 3.4s ease-in-out infinite;pointer-events:none}
 @keyframes lndrift{from{transform:translate(-6%,-4%) scale(1)}to{transform:translate(5%,6%) scale(1.15)}}
@@ -399,7 +400,7 @@ function launchPage(){
   document.getElementById('lngo').onclick=function(){
     ov.innerHTML=aur+spk+'<div class="lntro">'+
     '<div style="position:relative;width:150px;margin:0 auto 18px"><div class="lnsun"></div><div class="lnring" style="inset:-10px"></div><div class="lnring" style="inset:-10px;animation-delay:.45s"></div><div class="lnlogo lnbig lnglow lnshine" style="margin:0;width:130px;height:130px"><i class="mark" style="width:100%;height:100%;border-radius:inherit;display:block"></i></div></div>'+
-    '<h2 class="lnfire" style="margin:4px 0 0"><span class="lnletter" style="animation-delay:.25s">K</span><span class="lnletter" style="animation-delay:.4s">C</span><span class="lnletter" style="animation-delay:.55s">L</span></h2>'+
+    '<h2 style="font-size:52px;margin:4px 0 0"><span class="lnletter" style="animation-delay:.25s">K</span><span class="lnletter" style="animation-delay:.4s">C</span><span class="lnletter" style="animation-delay:.55s">L</span></h2>'+
     '<div class="lnpop" style="font-weight:900;color:#4a1d96;font-size:20px;animation-delay:.7s;letter-spacing:2px">KPD CRICKET LEAGUE</div>'+
     '<div class="lndiv"></div>'+
     '<div class="lnpop" style="color:#0b6b52;font-weight:800;margin-top:16px;font-size:17px;animation-delay:1.15s">The tournament is now open!</div>'+
