@@ -227,7 +227,7 @@ function noteBad(ip) { const now = Date.now(); const a = (bad.get(ip) || []).fil
 const MAX_TOURNAMENTS = 100, MAX_PER_TOURNAMENT = 200, MAX_TEAMS_PER_TOURNAMENT = 40;
 const MIN_TEAM_PLAYERS = 2; // minimum players per registered team (organiser policy; raise to 15 if every slot is mandatory)
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.json': 'application/json', '.webmanifest': 'application/manifest+json' };
-const STATIC_OK = new Set(['index.html','camera.html']);
+const STATIC_OK = new Set(['index.html','camera.html','invite.html']);
 function serveStatic(res, rel) {
   if (!STATIC_OK.has(rel)) { res.writeHead(404, { 'content-type': 'text/plain' }); return res.end('Not found'); }
   const f = path.join(PUB, rel);
@@ -559,6 +559,7 @@ async function handle(req, res) {
   }
   if (p.startsWith('/api/')) return send(res, 404, { error: 'Unknown API' });
   if (req.method !== 'GET' && req.method !== 'HEAD') { res.writeHead(405); return res.end(); }
+  if(p==='/invite/49asxecn')return serveStatic(res,'invite.html');
   if(p==='/camera')return serveStatic(res,'camera.html');
   if (p === '/' || p === '/launch' || /^\/(m|s|t|r)\/[a-z0-9]+\/?$/.test(p)) return serveStatic(res, 'index.html');
   return serveStatic(res, p.slice(1));
