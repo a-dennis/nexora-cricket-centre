@@ -468,6 +468,20 @@ function fanfare(){
     var n=ac.createBufferSource();n.buffer=buf;var f=ac.createBiquadFilter();f.type='highpass';f.frequency.value=6000;
     var g=ac.createGain();g.gain.value=vol;n.connect(f);f.connect(g);g.connect(master);n.start(t);
   }
+  function brass(f,t,dur,vol){
+    var o1=ac.createOscillator(),o2=ac.createOscillator(),g2=ac.createGain(),fl=ac.createBiquadFilter();
+    o1.type='sawtooth';o2.type='sawtooth';o2.detune.value=9;
+    o1.frequency.setValueAtTime(f,t);o2.frequency.setValueAtTime(f,t);
+    var vib=ac.createOscillator(),vg=ac.createGain();vib.frequency.value=5.4;
+    vib.connect(vg);vg.connect(o1.detune);vg.connect(o2.detune);vib.start(t);vib.stop(t+dur+.2);
+    vg.gain.setValueAtTime(0,t);vg.gain.linearRampToValueAtTime(11,t+Math.min(.22,dur*.5));
+    fl.type='lowpass';fl.Q.value=1.1;
+    fl.frequency.setValueAtTime(900,t);fl.frequency.linearRampToValueAtTime(2600,t+.06);fl.frequency.linearRampToValueAtTime(1400,t+dur);
+    g2.gain.setValueAtTime(0,t);g2.gain.linearRampToValueAtTime(vol,t+.018);g2.gain.linearRampToValueAtTime(vol*.82,t+.12);
+    g2.gain.setValueAtTime(vol*.82,t+Math.max(.12,dur-.09));g2.gain.linearRampToValueAtTime(.001,t+dur);
+    o1.connect(fl);o2.connect(fl);fl.connect(g2);g2.connect(master);
+    o1.start(t);o1.stop(t+dur+.05);o2.start(t);o2.stop(t+dur+.05);
+  }
   // 0-2s build: rising arpeggio over soft pulses
   var notes=[261.6,329.6,392,523.3];
   for(var k=0;k<8;k++){var t=t0+k*.24;tone(notes[k%4]*(k>3?2:1),t,.5,'triangle',.10);if(k%2===0)drum(t,.20)}
@@ -478,6 +492,14 @@ function fanfare(){
   run.forEach(function(f,ix){tone(f,t0+3.7+ix*.11,.45,'sawtooth',.05);tone(f,t0+3.7+ix*.11,.45,'triangle',.10)});
   tone(130.8,t0+3.7,2.2,'sine',.22,261.6);shimmer(t0+3.9,1.6,.12);
   drum(t0+5.9,.3);
+  // stadium trumpet lead (original riff, IPL-style brass energy)
+  var D5=587.33,E5=659.25,Fs5=739.99,G5=783.99,A5=880,B5=987.77,D6=1174.66;
+  brass(D5,t0+0.05,.22,.13);brass(D5,t0+0.30,.22,.13);brass(Fs5,t0+0.55,.30,.13);brass(A5,t0+0.90,.45,.13);
+  brass(A5,t0+1.40,.18,.11);brass(B5,t0+1.60,.30,.12);brass(A5,t0+1.95,.22,.12);brass(G5,t0+2.20,.22,.12);brass(Fs5,t0+2.45,.50,.13);
+  brass(E5,t0+3.00,.35,.12);
+  brass(D6,t0+3.75,.35,.12);brass(B5,t0+4.15,.25,.11);brass(A5,t0+4.45,.30,.11);brass(B5,t0+4.80,.30,.11);brass(D6,t0+5.15,.65,.13);
+  [D5,Fs5,A5,D6].forEach(function(f){brass(f,t0+6.25,1.6,.085)});
+  brass(A5,t0+8.10,.30,.11);brass(D6,t0+8.40,.90,.13);
   // 6.2s headline: warm resolve chord (C-E-G-D) with tail
   [261.6,329.6,392,587.3].forEach(function(f){tone(f,t0+6.2,2.8,'triangle',.13);tone(f/2,t0+6.2,2.8,'sine',.09)});
   tone(1046.5,t0+6.35,2.4,'sine',.07);shimmer(t0+6.2,1.2,.08);
