@@ -569,7 +569,7 @@ async function handle(req, res) {
       const st = engine.replay(m.config, events);
       const er = engine.validate(m.config, st, ev);
       if (er) return send(res, 400, { error: er });
-      const clean = ev.t === 'summary' ? {t:'summary',runs:ev.runs,wkts:ev.wkts,balls:ev.balls} : ev.t === 'sel' ? { t: 'sel', role: ev.role, player: ev.player }
+      const clean = ev.t === 'sel' ? { t: 'sel', role: ev.role, player: ev.player }
         : ev.t === 'ball' ? Object.assign({ t: 'ball', r: ev.r, x: ev.x || '' }, ev.w ? { w: { k: ev.w.k, who: ev.w.who, f: engine.cleanName(ev.w.f, 24) } } : {})
         : { t: 'end' };
       events.push(clean);
