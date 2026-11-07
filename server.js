@@ -36,6 +36,17 @@ function makeStore() {
           await c.query('COMMIT'); return true;
         } catch(e) { await c.query('ROLLBACK'); throw e; } finally { c.release(); }
       },
+      async deleteBackedUpMatch(expected) {
+        await ready; const c=await pool.connect();
+        try {
+          await c.query('BEGIN');
+          const found=await c.query('SELECT * FROM cricket_matches WHERE id=$1 FOR UPDATE',[expected.id]);
+          if(found.rows.length!==1 || matchSnapshot([row(found.rows[0])])!==matchSnapshot([expected])) { await c.query('ROLLBACK'); return false; }
+          const removed=await c.query('DELETE FROM cricket_matches WHERE id=$1 AND rev=$2',[expected.id,expected.rev]);
+          if(removed.rowCount!==1) { await c.query('ROLLBACK'); return false; }
+          await c.query('COMMIT'); return true;
+        } catch(e) { await c.query('ROLLBACK'); throw e; } finally { c.release(); }
+      },
       async get(id) { await ready; const r = await pool.query('SELECT * FROM cricket_matches WHERE id=$1', [id]); return row(r.rows[0]); },
       async count() { await ready; const r = await pool.query('SELECT count(*)::int AS n FROM cricket_matches'); return r.rows[0].n; },
       async create(m) { await ready; await pool.query('INSERT INTO cricket_matches(id,config,events,key_hash) VALUES($1,$2,$3,$4)', [m.id, JSON.stringify(m.config), '[]', m.keyHash]); },
@@ -80,6 +91,11 @@ function makeStore() {
     async replaceAllMatches(expected, fresh) {
       if (matchSnapshot(Object.values(db)) !== matchSnapshot(expected)) return false;
       db = { [fresh.id]: { id:fresh.id,config:fresh.config,events:[],keyHash:fresh.keyHash,rev:0,updated:new Date().toISOString() } }; save(); return true;
+    },
+    async deleteBackedUpMatch(expected) {
+      if(!db[expected.id] || matchSnapshot([db[expected.id]])!==matchSnapshot([expected]))return false;
+      const next=Object.assign({},db);delete next[expected.id];
+      fs.writeFileSync(file+'.tmp',JSON.stringify(next));fs.renameSync(file+'.tmp',file);db=next;return true;
     },
     async get(id) { const m = db[id]; return m ? JSON.parse(JSON.stringify(m)) : null; },
     async count() { return Object.keys(db).length; },
@@ -290,7 +306,7 @@ async function handle(req, res) {
     return send(res, 200, { ok: true });
   }
   let mt;
-  if (p === '/api/backup' || p === '/api/restore' || p === '/api/admin/tournament-name' || p === '/api/admin/tournament-listed' || p === '/api/admin/replace-matches') {
+  if (p === '/api/admin/delete-match' || p === '/api/backup' || p === '/api/restore' || p === '/api/admin/tournament-name' || p === '/api/admin/tournament-listed' || p === '/api/admin/replace-matches') {
     // Owner-only. Disabled unless BACKUP_TOKEN is set. Backups contain match data and hashed keys, never raw keys.
     const tok = process.env.BACKUP_TOKEN;
     if (!tok || tok.length < 24) return send(res, 404, { error: 'Unknown API' });
@@ -301,6 +317,13 @@ async function handle(req, res) {
       const [ms, ts] = [await store.allMatches(), await store.allTournaments()];
       return send(res, 200, { format: 'cricket-backup', version: 1, exportedAt: new Date().toISOString(), storage: store.kind,
         counts: { matches: ms.length, tournaments: ts.length }, tournaments: ts, matches: ms });
+    }
+    if (p === '/api/admin/delete-match' && req.method === 'POST') {
+      const body=await readBody(req,5e6),m=body&&body.expected;
+      if(!body || body.confirm!=='delete-only-backed-up-match' || !m || !/^[a-z0-9]{6,12}$/.test(String(m.id||'')) || !m.config || !Array.isArray(m.events) || !Number.isInteger(m.rev) || !/^[a-f0-9]{64}$/.test(String(m.keyHash||'')))return send(res,400,{error:'Need one exact backed-up match'});
+      if(m.id==='49asxecn')return send(res,403,{error:'The ceremonial match is protected from this operation'});
+      if(!(await store.deleteBackedUpMatch(m)))return send(res,409,{error:'Match missing or changed since backup. Nothing deleted.'});
+      return send(res,200,{ok:true,deletedId:m.id,removed:1});
     }
     if (p === '/api/admin/replace-matches' && req.method === 'POST') {
       const body = await readBody(req, 5e6);
