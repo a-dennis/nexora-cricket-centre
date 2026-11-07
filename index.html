@@ -1405,6 +1405,72 @@ function rosterPage(){
   app.innerHTML='<div class="card">Loading approved teams...</div>';refresh();setInterval(refresh,15000);document.addEventListener('visibilitychange',function(){if(!document.hidden)refresh()});
 }
 
+/* Extras + review flow; keep the existing quick selectors for wicket entry. */
+  
+var scorerPanelBeforeExtras=scorerPanel;
+  
+scorerPanel=function(){
+  
+  var h=scorerPanelBeforeExtras();
+  
+  if(h.indexOf('id="wk"')<0)return h;
+  
+  return h.replace('<button class="btn gx','<button class="btn gx" style="grid-column:1/-1" id="extrasplus"'+(busy||S.state.needs.length?' disabled':'')+'>Extras +</button><button class="btn gx');
+  
+};
+  
+document.addEventListener('click',function(e){if(e.target&&e.target.closest&&e.target.closest('#extrasplus')&&mode==='s')openExtrasPlus()});
+  
+function openExtrasPlus(){
+  
+  if(busy||!S||!hasScoring()||S.state.needs.length||S.state.result)return;
+  
+  var chosen='',runs=0,saving=false,openedRev=S.rev;
+  
+  var types=[['b','Bye + runs'],['lb','Leg bye + runs'],['wd','Wide + runs'],['nb','No ball + bat runs']];
+  
+  var d=openSheet('');
+  
+  function draw(){
+    
+    var penalty=chosen==='wd'?S.config.wideRun:chosen==='nb'?S.config.nbRun:0;
+    
+    var total=penalty+runs;
+    
+    var label=chosen==='wd'?'Additional runs after the wide':chosen==='nb'?'Runs off the bat':'Total '+(chosen==='lb'?'leg byes':'byes')+' on this ball';
+    
+    var note=chosen==='wd'?'Wide penalty ('+penalty+') is added automatically.':chosen==='nb'?'No-ball penalty ('+penalty+') is added automatically. This option credits the selected runs to the batter, not as byes or leg byes.':'No extra penalty is added. All selected runs are extras, not batter runs.';
+    
+    d.firstChild.innerHTML='<h2 style="margin-top:0">Extras +</h2><div class="mut">Choose the type, then runs. Nothing is recorded until Save.</div><div class="pills">'+types.map(function(t){return '<button class="opt'+(chosen===t[0]?' on':'')+'" data-et="'+t[0]+'">'+t[1]+'</button>'}).join('')+'</div>'+
+  
+      (chosen?'<h1>'+label+'</h1><div class="pills">'+[0,1,2,3,4,5,6,7].map(function(n){return '<button class="opt'+(runs===n?' on':'')+'" data-er="'+n+'">'+n+'</button>'}).join('')+'</div><div class="mut" style="margin:10px 0">'+note+'</div><div class="card" style="padding:14px;margin:12px 0"><b style="font-size:21px">Total: '+total+' run'+(total===1?'':'s')+'</b><div style="margin-top:6px">'+(chosen==='wd'||chosen==='nb'?penalty+' penalty + '+runs+(chosen==='nb'?' batter runs':' additional runs')+'<br>Does not count as a legal ball.':runs+' '+(chosen==='lb'?'leg bye':'bye')+' run'+(runs===1?'':'s')+'<br>Counts as one legal ball.')+'</div></div>':'')+
+      
+      '<div class="grid" style="grid-template-columns:1fr 1fr;margin-top:16px"><button class="btn sec" data-ec="1">Cancel</button><button class="btn pri" data-es="1"'+(!chosen||((chosen==='b'||chosen==='lb')&&runs===0)?' disabled':'')+'>Save'+(chosen?' '+total+' run'+(total===1?'':'s'):'')+'</button></div>';
+    
+  }
+  
+  d.onclick=function(e){
+    
+    if(saving)return;
+    
+    if(e.target===d){closeSheet();return}
+  
+    var b=e.target.closest('button');if(!b||b.disabled)return;
+  
+    if(b.dataset.et){chosen=b.dataset.et;runs=chosen==='b'||chosen==='lb'?1:0;draw()}
+  
+    else if(b.dataset.er!==undefined){runs=+b.dataset.er;draw()}
+  
+    else if(b.dataset.ec){closeSheet()}
+  
+    else if(b.dataset.es&&chosen){if(S.rev!==openedRev){closeSheet();toast('Match changed. Open Extras + again to review.');return}saving=true;closeSheet();post('/event',{event:{t:'ball',r:runs,x:chosen}})}
+    
+  };
+  
+  draw();
+  
+}
+  
 /* ---------- boot ---------- */
 if(mode==='launch')launchPage();
 else if(mode==='home')home();
