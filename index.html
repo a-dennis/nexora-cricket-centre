@@ -224,10 +224,22 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 @keyframes lnspin{from{transform:rotateY(0deg)}to{transform:rotateY(360deg)}}
 @keyframes lnzoomfill{0%{transform:scale(1)}26%{transform:scale(10)}58%{transform:scale(10)}100%{transform:scale(1)}}
 .lncnr{position:fixed;z-index:62;width:clamp(68px,22vw,180px);height:auto;pointer-events:none;filter:drop-shadow(0 6px 12px rgba(74,29,150,.28))}
-.lncnr.tl{top:12px;left:12px}
-.lncnr.tr{top:12px;right:12px;transform:scaleX(-1)}
-.lncnr.bl{bottom:12px;left:12px}
-.lncnr.br{bottom:12px;right:12px;transform:scaleX(-1)}
+.lncnr.tl{top:12%;left:15%}
+.lncnr.tr{top:20%;right:15%;transform:scaleX(-1)}
+.lncnr.bl{bottom:16%;left:16%}
+.lncnr.br{bottom:16%;right:15%;transform:scaleX(-1)}
+@media (max-width:600px){
+.lncnr.tl{top:10%;left:6%}
+.lncnr.tr{top:16%;right:6%}
+.lncnr.bl{bottom:12%;left:6%}
+.lncnr.br{bottom:12%;right:6%}
+}
+@media (max-width:360px){
+.lncnr.tl{top:8%;left:2.5%}
+.lncnr.tr{top:14%;right:2.5%}
+.lncnr.bl{bottom:12%;left:2.5%}
+.lncnr.br{bottom:12%;right:2.5%}
+}
 .lncele{position:absolute;z-index:1;pointer-events:none;animation:lncele 3.2s ease-in-out infinite;filter:drop-shadow(0 3px 6px rgba(74,29,150,.22))}
 @keyframes lncele{0%,100%{transform:translateY(0) rotate(-6deg)}50%{transform:translateY(-12px) rotate(6deg)}}
 @media (prefers-reduced-motion: reduce){.lncele{animation:none}}
