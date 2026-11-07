@@ -149,13 +149,19 @@ function publicView(m) {
   return { id: m.id, rev: m.rev, updated: m.updated, config, inTournament: !!(m.config && m.config.tid), state: engine.view(m.config, m.events), storage: store.kind };
 }
 const keyEq = (given, hash) => { const a = Buffer.from(sha(given || '')), b = Buffer.from(String(hash)); return a.length === b.length && crypto.timingSafeEqual(a, b); };
+async function orgSessionRecord(token){
+  if(typeof token!=='string'||token.length<16||token.length>64)return null;
+  let rec=null;try{rec=JSON.parse((await store.getSetting('orgsess_'+sha(token)))||'null')}catch(e){}
+  if(rec&&rec.exp>Date.now()&&keyEq(token,rec.h))return rec;
+  try{rec=JSON.parse((await store.getSetting('orgsess'))||'null')}catch(e){rec=null}
+  return rec&&rec.exp>Date.now()&&keyEq(token,rec.h)?rec:null;
+}
+async function validOrgSession(token){return !!(await orgSessionRecord(token));}
 // Recovery is limited to the fresh replacement ceremony. It never reveals or rotates its scorer key.
 async function canScore(req,m) {
   if (keyEq(req.headers['x-scorer-key'],m.keyHash)) return true;
   if(m.id!=='49asxecn'||!m.config||m.config.tid!=='whxrz4tw') return false;
-  let sess=null;try{sess=JSON.parse((await store.getSetting('orgsess'))||'null')}catch(e){}
-  const token=req.headers['x-org-session'];
-  if(!sess||typeof token!=='string'||token.length<16||token.length>64||sess.exp<=Date.now()||!keyEq(token,sess.h))return false;
+  if(!(await validOrgSession(req.headers['x-org-session'])))return false;
   const t=await store.tget(m.config.tid);
   return !!(t&&keyEq(req.headers['x-org-key'],t.keyHash));
 }
@@ -234,7 +240,7 @@ function registeredTeamRefs(m, t) {
 function summary(m, tournament) {
   const st = engine.view(m.config, m.events);
   return { id: m.id, title: m.config.title, date: m.config.date || null, teams: m.config.teams.map((t) => t.name), teamRefs: registeredTeamRefs(m, tournament),
-    innings: st.innings.filter((i) => i.balls > 0).map((i) => ({ team: i.batName, runs: i.runs, wkts: i.wkts, overs: i.overs })),
+    innings: st.innings.filter((i) => i.balls > 0 || i.summary).map((i) => ({ team: i.batName, runs: i.runs, wkts: i.wkts, overs: i.overs })),
     result: st.result ? st.result.text : null, status: m.events.length === 0 ? 'new' : (st.result ? 'done' : 'live') };
 }
 const bad = new Map();
@@ -291,18 +297,20 @@ async function handle(req, res) {
       crypto.timingSafeEqual(Buffer.from(crypto.scryptSync(pw, ph.salt, 32).toString('hex')), Buffer.from(String(ph.hash))));
     if (!ok) { noteBad(ip); return send(res, 403, { error: 'Wrong username or password' }); }
     const token = rnd(24);
-    await store.setSetting('orgsess', JSON.stringify({ h: sha(token), exp: Date.now() + 30 * 864e5 }));
+    await store.setSetting('orgsess_'+sha(token),JSON.stringify({h:sha(token),exp:Date.now()+30*864e5}));
     return send(res, 200, { ok: true, token });
   }
   if (p === '/api/auth/check' && req.method === 'POST') {
     const body = await readBody(req, 2e3);
-    let sess = null; try { sess = JSON.parse((await store.getSetting('orgsess')) || 'null'); } catch (e) { sess = null; }
-    const tok = body && body.token;
-    const ok = !!(sess && typeof tok === 'string' && tok.length >= 16 && tok.length <= 64 && sess.exp > Date.now() && keyEq(tok, sess.h));
+    const ok=await validOrgSession(body&&body.token);
     return send(res, 200, { ok });
   }
   if (p === '/api/auth/logout' && req.method === 'POST') {
-    await store.setSetting('orgsess', null);
+    const body=await readBody(req,2e3),token=body&&body.token;
+    if(!(await validOrgSession(token)))return send(res,403,{error:'Valid session required'});
+    await store.setSetting('orgsess_'+sha(token),null);
+    let legacy=null;try{legacy=JSON.parse((await store.getSetting('orgsess'))||'null')}catch(e){}
+    if(legacy&&keyEq(token,legacy.h))await store.setSetting('orgsess',null);
     return send(res, 200, { ok: true });
   }
   let mt;
@@ -567,9 +575,10 @@ async function handle(req, res) {
     } else {
       const ev = body.event;
       const st = engine.replay(m.config, events);
+      if(ev&&ev.t==='completedSummary'&&events.length)return send(res,400,{error:'Completed summary requires a match with no recorded events. Existing events were preserved.'});
       const er = engine.validate(m.config, st, ev);
       if (er) return send(res, 400, { error: er });
-      const clean = ev.t === 'sel' ? { t: 'sel', role: ev.role, player: ev.player }
+      const clean = ev.t==='summary'?{t:'summary',runs:ev.runs,wkts:ev.wkts,balls:ev.balls}:ev.t === 'completedSummary' ? {t:'completedSummary',innings:ev.innings.map(x=>({runs:x.runs,wkts:x.wkts,balls:x.balls})),winner:ev.winner} : ev.t === 'sel' ? { t: 'sel', role: ev.role, player: ev.player }
         : ev.t === 'ball' ? Object.assign({ t: 'ball', r: ev.r, x: ev.x || '' }, ev.w ? { w: { k: ev.w.k, who: ev.w.who, f: engine.cleanName(ev.w.f, 24) } } : {})
         : { t: 'end' };
       events.push(clean);

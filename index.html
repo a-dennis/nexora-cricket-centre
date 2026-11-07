@@ -350,7 +350,7 @@ function chips(arr,pad){var h='';arr.forEach(function(t){h+='<div class="ball '+
 function buildReport(S){
   var c=S.config,st=S.state,E=esc;
   var rules='Wide: '+c.wideRun+' run'+(c.wideRun===1?'':'s')+' · No ball: '+c.nbRun+' run'+(c.nbRun===1?'':'s')+' · '+(c.maxOversPerBowler?('Max '+c.maxOversPerBowler+' over'+(c.maxOversPerBowler>1?'s':'')+' per bowler'):'No bowler over limit')+' · Ties are recorded as ties';
-  var started=st.innings.filter(function(i){return i.balls>0});
+  var started=st.innings.filter(function(i){return (i.balls>0||i.summary)});
   var status=st.result?E(st.result.text):(started.length?'Match in progress when this report was saved':'Match not started');
   var html='<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>'+E(c.title)+' - Match report</title><style>'+
   '*{box-sizing:border-box}body{margin:0;background:#e9edf7;color:#16204a;font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;padding:24px 12px}'+
@@ -368,13 +368,14 @@ function buildReport(S){
   'table.bb td{font-size:12.5px;padding:5px 5px}@media(max-width:560px){table.bb tr:first-child{display:none}table.bb tr{display:grid;grid-template-columns:44px 1fr auto;grid-template-areas:"a e f" "a b b" "a c c" "a d d";padding:7px 0;border-bottom:1px solid #e3e8f5}table.bb td{border:0;padding:1px 4px;text-align:left!important}table.bb .c1{grid-area:a;font-weight:800}table.bb .c2{grid-area:b}table.bb .c3{grid-area:c}table.bb .c4{grid-area:d}table.bb .c5{grid-area:e;font-weight:700}table.bb .c6{grid-area:f;font-weight:800}table.bb .c2:before{content:"Bowler: ";color:#6a78a8}table.bb .c3:before{content:"Striker: ";color:#6a78a8}table.bb .c4:before{content:"Non-striker: ";color:#6a78a8}}table.bb td.o{color:#16204a}@media print{h3{break-after:avoid}body{background:#fff;padding:0}.sheet{box-shadow:none;border-radius:0;max-width:none}.pb{display:none}.hd,.tm,.b4,.b6,.bw2,tr.tot td,.res{-webkit-print-color-adjust:exact;print-color-adjust:exact}h2{break-after:avoid}table,.ov{break-inside:avoid}}'+
   '</style></head><body><div class="sheet"><div class="hd"><div class="brand"><i class="mk"></i>KCL (KPD Cricket League)</div><h1>'+E(c.title)+'</h1><div class="meta">'+(c.date?E(niceDate(c.date))+' · ':'')+E(c.teams[0].name)+' v '+E(c.teams[1].name)+' · '+c.overs+' over'+(c.overs>1?'s':'')+' a side'+(c.demo?' · Practice match':'')+'</div><div class="res">'+status+'</div><div class="sb">';
   [0,1].forEach(function(t){
-    var inn=st.innings.filter(function(i){return i.bat===t&&i.balls>0})[0];
-    html+='<div class="tm"><b>'+E(c.teams[t].name)+'</b>'+(inn?'<div class="sc">'+inn.runs+'/'+inn.wkts+'</div><small>'+E(inn.overs)+' / '+c.overs+' overs · RR '+inn.rr.toFixed(2)+'</small>':'<small>Yet to bat</small>')+'</div>';
+    var inn=st.innings.filter(function(i){return i.bat===t&&(i.balls>0||i.summary)})[0];
+    html+='<div class="tm"><b>'+E(c.teams[t].name)+'</b>'+(inn?'<div class="sc">'+inn.runs+'/'+inn.wkts+'</div><small>'+(inn.summary?'Innings summary; player details not recorded':E(inn.overs)+' / '+c.overs+' overs · RR '+inn.rr.toFixed(2))+'</small>':'<small>Yet to bat</small>')+'</div>';
   });
   html+='</div></div><div class="bd"><div class="note" style="margin-top:14px"><b>Rules used:</b> '+E(rules)+'</div>';
   started.forEach(function(i,k){
     var by=i.endedBy?({allout:'All out',overs:'Overs complete',target:'Target reached',declared:'Innings closed by scorer'})[i.endedBy]||String(i.endedBy):(i.done?'Innings complete':'Innings in progress');
     html+='<h2>'+(i.idx===0?'1st':'2nd')+' innings · '+E(i.batName)+'</h2><div class="note">'+E(by)+(i.target?' · Target '+i.target:'')+'</div>';
+    if(i.summary){html+='<div class="note">Final total entered as an innings summary: '+i.runs+'/'+i.wkts+' ('+E(i.overs)+' overs). Individual balls, batting, bowling and extras were not recorded.</div>';return;}
     html+='<h3>Batting</h3><div class="tw"><table><tr><th>Batter</th><th></th><th>R</th><th>B</th><th>4s</th><th>6s</th><th>SR</th></tr>';
     i.batting.forEach(function(b){html+='<tr><td><b>'+E(b.name)+'</b></td><td class="o">'+(b.notOut?'not out':E(b.out))+'</td><td><b>'+b.runs+'</b></td><td>'+b.balls+'</td><td>'+b.fours+'</td><td>'+b.sixes+'</td><td>'+b.sr+'</td></tr>'});
     var ex=i.extras;html+='<tr><td>Extras</td><td class="o">wd '+ex.wd+', nb '+ex.nb+', b '+ex.b+', lb '+ex.lb+'</td><td><b>'+i.extrasTotal+'</b></td><td colspan="4"></td></tr>';
@@ -539,7 +540,7 @@ function buildCardImage(S){
   function F(w,s){return w+' '+s+'px system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif'}
   function fit(t,max){t=String(t==null?'':t);if(ctx.measureText(t).width<=max)return t;while(t.length>1&&ctx.measureText(t+'…').width>max)t=t.slice(0,-1);return t+'…'}
   function rr(x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath()}
-  var innings=st.innings.filter(function(i){return i.balls>0});
+  var innings=st.innings.filter(function(i){return (i.balls>0||i.summary)});
   var status=st.result?st.result.text:(innings.length?'Match in progress when this image was saved':'Match not started');
   var meta=(c.date?niceDate(c.date)+' · ':'')+c.teams[0].name+' v '+c.teams[1].name+' · '+c.overs+' over'+(c.overs>1?'s':'')+' a side'+(c.demo?' · Practice match':'');
   function draw(measure){
@@ -557,10 +558,10 @@ function buildCardImage(S){
     // team score tiles
     var tw=(CW-20)/2;
     [0,1].forEach(function(t){
-      var x=16+PAD-6+t*(tw+20),inn=st.innings.filter(function(i){return i.bat===t&&i.balls>0})[0];
+      var x=16+PAD-6+t*(tw+20),inn=st.innings.filter(function(i){return i.bat===t&&(i.balls>0||i.summary)})[0];
       if(!measure){ctx.fillStyle='#fff';rr(x,y,tw,118,18);ctx.fill();ctx.strokeStyle='#f0dca0';ctx.lineWidth=2;rr(x,y,tw,118,18);ctx.stroke();
         ctx.fillStyle='#1b1740';ctx.font=F(800,20);ctx.fillText(fit(c.teams[t].name,tw-32),x+16,y+32)}
-      if(inn){if(!measure){ctx.font=F(900,40);ctx.fillText(inn.runs+'/'+inn.wkts,x+16,y+76);ctx.font=F(600,15);ctx.fillStyle='#6d6791';ctx.fillText(inn.overs+' / '+c.overs+' overs · RR '+inn.rr.toFixed(2),x+16,y+102)}}
+      if(inn){if(!measure){ctx.font=F(900,40);ctx.fillText(inn.runs+'/'+inn.wkts,x+16,y+76);ctx.font=F(600,15);ctx.fillStyle='#6d6791';ctx.fillText((inn.summary?'Innings summary; details not recorded':inn.overs+' / '+c.overs+' overs · RR '+inn.rr.toFixed(2)),x+16,y+102)}}
       else if(!measure){ctx.font=F(600,16);ctx.fillStyle='#6d6791';ctx.fillText('Yet to bat',x+16,y+74)}
     });
     y+=118+30;
@@ -570,6 +571,7 @@ function buildCardImage(S){
       y+=34;
       if(!measure){ctx.fillStyle='#6d6791';ctx.font=F(600,15);ctx.fillText(fit(by2+(i.target?' · Target '+i.target:'')+' · '+i.runs+'/'+i.wkts+' in '+i.overs+' overs',CW),16+PAD-6,y+8)}
       y+=30;
+      if(i.summary){if(!measure){ctx.fillStyle='#6d6791';ctx.font=F(600,15);ctx.fillText('Innings summary. Balls and player details not recorded.',16+PAD-6,y+8)}y+=48;return;}
       var cols=[W-PAD-260,W-PAD-200,W-PAD-140,W-PAD-80,W-PAD-16],heads=['R','B','4s','6s','SR'];
       if(!measure){ctx.font=F(700,13);ctx.fillStyle='#7a6a2d';ctx.fillText('BATTER',16+PAD-6,y+8);heads.forEach(function(h2,j){var w2=ctx.measureText(h2).width;ctx.fillText(h2,cols[j]-w2,y+8)})}
       y+=20;
@@ -1101,14 +1103,14 @@ function tickLabel(){var e=document.getElementById('upd');if(!e)return;var s=Mat
 function cur(){return S.state.innings[S.state.cur]}
 function head(){
   var st=S.state,c=S.config;
-  var pill=st.result?'<span class="stp fin">RESULT</span>':(st.innings.some(function(i){return i.balls>0})?'<span class="stp lv"><i></i>LIVE</span>':'<span class="stp">UPCOMING</span>');
+  var pill=st.result?'<span class="stp fin">RESULT</span>':(st.innings.some(function(i){return (i.balls>0||i.summary)})?'<span class="stp lv"><i></i>LIVE</span>':'<span class="stp">UPCOMING</span>');
   return '<div class="top"><span class="brand"><i class="mark"></i>KCL (KPD Cricket League)</span>'+(c.demo?'<span class="demo">SAMPLE / PRACTICE</span>':'<span></span>')+'</div>'+
   '<div class="mh"><div class="row"><h2>'+esc(c.title)+'</h2>'+pill+'</div><div class="sub">'+scoreTeamLink(c.teams[0].name)+' v '+scoreTeamLink(c.teams[1].name)+' · '+c.overs+' overs a side'+(c.date?' · '+esc(niceDate(c.date)):'')+' · <span id="upd"></span></div></div>';
 }
 function mini(){
   var st=S.state,c=S.config;
   return '<div class="mini">'+[0,1].map(function(t){
-    var inn=st.innings.filter(function(i){return i.bat===t&&(i.balls>0||i.idx===st.cur&&i.batting.length)})[0];
+    var inn=st.innings.filter(function(i){return i.bat===t&&((i.balls>0||i.summary)||i.idx===st.cur&&i.batting.length)})[0];
     var on=!st.result&&inn&&inn.idx===st.cur;
     return '<span class="mt'+(on?' on':'')+'"><em class="lg l'+t+'">'+esc(ini(c.teams[t].name))+'</em>'+(inn?'<b>'+inn.runs+'/'+inn.wkts+'</b><small>'+inn.overs+'</small>':'<small>Yet to bat</small>')+'</span>';
   }).join('<span class="vs">v</span>')+'</div>';
@@ -1127,9 +1129,10 @@ function scoreCard(){
       (inn?'<div class="score">'+inn.runs+'<small>/'+inn.wkts+'</small><div class="ov">'+inn.overs+' / '+c.overs+' ov</div></div>':'<div class="yet">Yet to bat</div>')+'</div>';
   };
   var first=st.innings[0],second=st.innings[1],bf=first.bat,bs=1-bf;
-  var h='<div class="card hero2">'+row(bf,first.balls>0||st.cur===0?first:null,st.cur===1)+row(bs,second&&(second.balls>0||st.cur===1)?second:null,st.cur===0);
+  var h='<div class="card hero2">'+row(bf,(first.balls>0||first.summary)||st.cur===0?first:null,st.cur===1)+row(bs,second&&(second.balls>0||second.summary||st.cur===1)?second:null,st.cur===0);
+  if(first.summary)h+='<div class="sub" style="padding:8px 0">Innings totals entered as summaries. Unknown scores show ?. Ball and player details not recorded.</div>';
   h+=statusLine();
-  if(!st.result&&i.balls>0){
+  if(!st.result&&(i.balls>0||i.summary)){
     var crr=i.rr.toFixed(2);
     h+='<div class="stats"><div><small>CRR</small><b>'+crr+'</b></div>'+(i.target?'<div><small>Target</small><b>'+i.target+'</b></div><div><small>RRR</small><b>'+(i.rrr!==null?i.rrr.toFixed(2):'-')+'</b></div>':'<div><small>Projected</small><b>'+(i.projected||'-')+'</b></div>')+'<div><small>Balls left</small><b>'+i.ballsLeft+'</b></div></div>';
     h+='<div class="bar"><b style="width:'+Math.min(100,Math.round(i.balls*100/(c.overs*6)))+'%"></b></div>';
@@ -1199,6 +1202,7 @@ function cmText(l){
 function commentaryTab(){
   var h='',any=false;
   S.state.innings.slice().reverse().forEach(function(i){
+    if(i.summary){any=true;h+='<h1>'+esc(i.batName)+' innings</h1><div class="card">Final summary: '+i.runs+'/'+i.wkts+'. Ball-by-ball details were not recorded.</div>';return;}
     var L=i.ballLog||[];if(!L.length)return;any=true;
     h+='<h1>'+esc(i.batName)+' innings</h1><div class="card" style="padding:4px 14px">';
     for(var k=L.length-1;k>=0;k--){
@@ -1215,6 +1219,7 @@ function scorecardTab(){
   var h='';
   S.state.innings.forEach(function(i,n){
     if(!i.batting.length&&n>S.state.cur)return;
+    if(i.summary){h+='<h1>'+scoreTeamLink(i.batName)+' · '+i.runs+'/'+i.wkts+' ('+i.overs+' ov)</h1><div class="card">Final innings summary. Individual balls, batting, bowling and extras were not recorded.</div>';return;}
     h+='<h1>'+scoreTeamLink(i.batName)+' · '+i.runs+'/'+i.wkts+' ('+i.overs+' ov)</h1><div class="card" style="padding:6px 18px"><table class="tbl"><tr><th>Batter</th><th>R</th><th>B</th><th>4s</th><th>6s</th><th>SR</th></tr>'+
     i.batting.map(function(b){return '<tr><td><b>'+esc(b.name)+'</b><div class="sub">'+esc(b.notOut?'not out':b.out)+'</div></td><td><b>'+b.runs+'</b></td><td>'+b.balls+'</td><td>'+b.fours+'</td><td>'+b.sixes+'</td><td>'+b.sr+'</td></tr>'}).join('')+
     '<tr><td>Extras<div class="sub">wd '+i.extras.wd+', nb '+i.extras.nb+', b '+i.extras.b+', lb '+i.extras.lb+'</div></td><td><b>'+i.extrasTotal+'</b></td><td colspan="4"></td></tr></table>'+
@@ -1228,6 +1233,7 @@ function scorecardTab(){
 function oversTab(){
   var h='';
   S.state.innings.forEach(function(i){
+    if(i.summary){h+='<h1>'+esc(i.batName)+' innings</h1><div class="card">Final innings summary. Over-by-over details were not recorded.</div>';return;}
     var all=i.overHistory.slice();
     if(i.thisOver.length)all.push({n:i.curOverNo,bowler:i.bowler!==null?i.players.bowl[i.bowler]:'',balls:i.thisOver,runs:null});
     if(!all.length)return;
@@ -1255,6 +1261,42 @@ function wire(){
 }
 
 /* ---------- SCORER ---------- */
+document.addEventListener('click',function(e){
+ if(e.target&&e.target.id==='firstsummaryopen'&&hasScoring()){
+  closeSheet();var d=openSheet('<h2>Completed first innings</h2><div class="mut">Enter only the confirmed final total. No balls or player scores will be invented. This closes the first innings and starts the chase. Undo removes this summary.</div><label>Final runs</label><input id="sumruns" type="number" min="0" max="999"><label>Wickets lost</label><input id="sumwkts" type="number" min="0" max="14"><label>Overs completed (leave blank if unknown)</label><input id="sumovers" placeholder="e.g. 4 or 3.2"><button class="btn pri" id="sumsave">Save final summary and start chase</button><button class="btn sec" id="sumcancel">Cancel</button>');
+  var openedRev=S.rev;
+  d.querySelector('#sumcancel').onclick=closeSheet;
+  d.querySelector('#sumsave').onclick=function(){
+   var r=d.querySelector('#sumruns').value,w=d.querySelector('#sumwkts').value,o=d.querySelector('#sumovers').value.trim(),balls=null;
+   if(r===''||w===''){toast('Enter runs and wickets');return}
+   if(o){if(!/^\d+(\.[0-5])?$/.test(o)){toast('Use overs such as 4 or 3.2');return}var p=o.split('.');balls=Number(p[0])*6+Number(p[1]||0)}
+   if(S.rev!==openedRev){closeSheet();toast('Match changed. Review the score first.');return}
+   if(!confirm('Close '+S.config.teams[S.config.batFirst].name+' innings at '+r+'/'+w+'? This is a summary, not ball-by-ball scoring.'))return;
+   closeSheet();post('/event',{event:{t:'summary',runs:Number(r),wkts:Number(w),balls:balls}});
+  };
+ }
+});
+
+document.addEventListener('click',function(e){
+ if(e.target&&e.target.id==='summaryopen'&&hasScoring()){
+  closeSheet();var html='<h2>Completed match summary</h2><div class="mut">Only for a match with no recorded events. Leave unconfirmed fields blank. No balls, player scores or extras will be invented. Saving records the final result. Undo removes the summary.</div>';
+  [S.config.batFirst,1-S.config.batFirst].forEach(function(t,j){html+='<h3>'+esc(S.config.teams[t].name)+'</h3><label>Final runs (blank if unknown)</label><input id="sumr'+j+'" type="number" min="0" max="999"><label>Wickets (blank if unknown)</label><input id="sumw'+j+'" type="number" min="0" max="14"><label>Overs (blank if unknown)</label><input id="sumo'+j+'" placeholder="e.g. 4 or 3.2">'});
+  html+='<label>Confirmed result</label><select id="sumwinner"><option value="">Choose result</option><option value="0">'+esc(S.config.teams[0].name)+' won</option><option value="1">'+esc(S.config.teams[1].name)+' won</option><option value="tie">Match tied</option></select><button class="btn pri" id="sumsave">Save completed match summary</button><button class="btn sec" id="sumcancel">Cancel</button>';
+  var d=openSheet(html),openedRev=S.rev;d.querySelector('#sumcancel').onclick=closeSheet;
+  d.querySelector('#sumsave').onclick=function(){
+   var innings=[],bad=false,win=d.querySelector('#sumwinner').value;
+   if(win===''){toast('Choose confirmed result');return}
+   [0,1].forEach(function(j){var r=d.querySelector('#sumr'+j).value,w=d.querySelector('#sumw'+j).value,o=d.querySelector('#sumo'+j).value.trim(),balls=null;
+    if(o){if(!/^\d+(\.[0-5])?$/.test(o)){bad=true;return}var p=o.split('.');balls=Number(p[0])*6+Number(p[1]||0)}
+    innings.push({runs:r===''?null:Number(r),wkts:w===''?null:Number(w),balls:balls});});
+   if(bad){toast('Use overs such as 4 or 3.2');return}
+   if(S.rev!==openedRev){closeSheet();toast('Match changed. Review the score first.');return}
+   if(!confirm('Save completed match? '+innings.map(function(x,j){return S.config.teams[j===0?S.config.batFirst:1-S.config.batFirst].name+': '+(x.runs===null?'?':x.runs)+'/'+(x.wkts===null?'?':x.wkts)}).join('; ')+'. Result: '+(win==='tie'?'Match tied':S.config.teams[Number(win)].name+' won')+'. Unknown details stay unrecorded.'))return;
+   closeSheet();post('/event',{event:{t:'completedSummary',innings:innings,winner:win==='tie'?null:Number(win)}});
+  };
+ }
+});
+
 function scorerPanel(){
   if(!hasScoring())return '<div class="warn" style="margin-top:14px">This is a view-only link. Open the scorer link you were given to enter scores.</div>';
   var st=S.state,i=cur();
@@ -1267,6 +1309,7 @@ function scorerPanel(){
   h+='<button class="btn g4" data-r="4"'+dis+'>4</button><button class="btn g6" data-r="6"'+dis+'>6</button><button class="btn gw span2" id="wk"'+dis+'>WICKET</button>';
   [['wd','Wide'],['nb','No ball'],['b','Bye'],['lb','Leg bye']].forEach(function(e){h+='<button class="btn gx'+(extra===e[0]?' on':'')+'" data-x="'+e[0]+'"'+dis+'>'+e[1]+'</button>'});
   h+='</div><div class="grid" style="grid-template-columns:repeat(4,1fr)"><button class="btn small" data-r="5"'+dis+'>5 runs</button><button class="btn small" data-r="7"'+dis+'>7 runs</button><button class="btn small" id="undo"'+(busy?' disabled':'')+'>↶ Undo</button><button class="btn small" id="swap"'+dis+'>End innings</button></div></div>';
+  if(st.cur===0&&!S.state.lastBall)h+='<button class="btn sec" id="summaryopen" style="margin-top:10px">Enter completed match summary</button><button class="btn sec" id="firstsummaryopen">Enter first innings and start chase</button>';
   return h;
 }
 function post(url,body){
@@ -1303,6 +1346,7 @@ function openNeeds(){
     if(S.config.maxOversPerBowler)list=list.filter(function(o){var b=i.bowling.filter(function(x){return x.p===o.p})[0];return !b||parseFloat(b.overs)<S.config.maxOversPerBowler})}
   else list=i.yetToBat;
   var d=openSheet('<h2 style="margin-top:0">'+esc(title)+'</h2><div class="mut">'+(st.cur===1&&!i.balls&&role==='striker'?'Second innings: '+esc(i.batName)+' need '+i.target+' to win. ':'')+(role==='bowler'?esc(i.bowlName):esc(i.batName))+'</div>'+list.map(function(o){return '<button class="opt" data-p="'+o.p+'">'+esc(o.name)+'</button>'}).join('')+(list.length?'':'<div class="warn">No eligible player. Use Undo, or change the over limit rule.</div><button class="opt" id="sundo">↶ Undo last ball</button>'));
+  if(st.cur===0&&!S.state.lastBall)d.firstChild.insertAdjacentHTML('afterbegin','<button class="btn sec" id="summaryopen">Enter completed match summary instead</button><button class="btn sec" id="firstsummaryopen">Enter first innings and start chase</button>');
   d.onclick=function(e){var b=e.target.closest('button');if(!b)return;if(b.id==='sundo'){post('/undo');return}var p=b.getAttribute('data-p');if(p!==null)post('/event',{event:{t:'sel',role:role,player:+p}})};
 }
 function openWicket(){

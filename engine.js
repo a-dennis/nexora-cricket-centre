@@ -106,6 +106,26 @@ function validate(cfg, st, ev) {
   if (st.result) return 'Match is finished';
   const inn = st.innings[st.cur];
   const needs = needsOf(st);
+  if (ev.t === 'summary') {
+    if(st.cur!==0 || inn.balls || inn.log.length || inn.summary) return 'Summary is only allowed before any first-innings deliveries';
+    if(!Number.isInteger(ev.runs)||ev.runs<0||ev.runs>999||!Number.isInteger(ev.wkts)||ev.wkts<0||ev.wkts>=cfg.teams[inn.bat].players.length)return 'Enter a valid final total and wickets';
+    if(ev.balls!==null && (!Number.isInteger(ev.balls)||ev.balls<0||ev.balls>cfg.overs*6))return 'Enter valid legal balls or leave overs unknown';
+    return null;
+  }
+  if (ev.t === 'completedSummary') {
+    if(st.cur!==0 || inn.balls || inn.log.length || inn.order.length || inn.bowler!==null || inn.summary) return 'Completed summary requires an empty match';
+    if(!Array.isArray(ev.innings)||ev.innings.length!==2 || ![0,1,null].includes(ev.winner))return 'Enter both innings and the confirmed result';
+    for(let j=0;j<2;j++){
+      const x=ev.innings[j],bat=j===0?cfg.batFirst:1-cfg.batFirst;
+      if(!x||Object.keys(x).some(k=>!['runs','wkts','balls'].includes(k)))return 'Bad innings summary';
+      if(x.runs!==null&&(!Number.isInteger(x.runs)||x.runs<0||x.runs>999))return 'Invalid runs';
+      if(x.wkts!==null&&(!Number.isInteger(x.wkts)||x.wkts<0||x.wkts>=cfg.teams[bat].players.length))return 'Invalid wickets';
+      if(x.balls!==null&&(!Number.isInteger(x.balls)||x.balls<0||x.balls>cfg.overs*6))return 'Invalid overs';
+    }
+    const a=ev.innings[0].runs,b=ev.innings[1].runs;
+    if(a!==null&&b!==null){const winner=a===b?null:(a>b?cfg.batFirst:1-cfg.batFirst);if(ev.winner!==winner)return 'Confirmed winner disagrees with totals';}
+    return null;
+  }
   if (ev.t === 'end') return null;
   if (ev.t === 'sel') {
     if (!needs.includes(ev.role)) return 'Not needed right now';
@@ -215,6 +235,14 @@ function replay(cfg, events) {
         else if (ev.role === 'non') inn.non = p;
         else { if (inn.pendingSlot === 's') inn.striker = p; else inn.non = p; inn.pendingSlot = null; }
       }
+    } else if(ev.t==='summary') {
+      inn.runs=ev.runs;inn.wkts=ev.wkts;inn.balls=ev.balls===null?0:ev.balls;inn.summary=true;inn.summaryBalls=ev.balls;
+      finishInnings(cfg,st,'summary');
+    } else if(ev.t==='completedSummary') {
+      st.innings=[mkInnings(cfg,0),mkInnings(cfg,1)];
+      st.innings.forEach((x,j)=>{const q=ev.innings[j];x.runs=q.runs;x.wkts=q.wkts;x.balls=q.balls===null?0:q.balls;x.summary=true;x.summaryBalls=q.balls;x.done=true;x.endedBy='summary';});
+      st.cur=1;st.innings[1].target=ev.innings[0].runs===null?null:ev.innings[0].runs+1;
+      st.result={winner:ev.winner,text:ev.winner===null?'Match tied':cfg.teams[ev.winner].name+' won the match',summary:true};
     } else if (ev.t === 'ball') applyBall(cfg, st, ev);
     else if (ev.t === 'end') {
       // flush a partial over into history so scorecards stay complete
@@ -235,12 +263,13 @@ function view(cfg, events) {
     const maxBalls = cfg.overs * 6;
     return {
       idx, bat: inn.bat, bowl: inn.bowl, batName: cfg.teams[inn.bat].name, bowlName: cfg.teams[inn.bowl].name,
-      runs: inn.runs, wkts: inn.wkts, balls: inn.balls, overs: oversText(inn.balls), done: inn.done, endedBy: inn.endedBy,
-      target: inn.target, extras: inn.extras, extrasTotal: inn.extras.wd + inn.extras.nb + inn.extras.b + inn.extras.lb,
+      runs: inn.summary&&inn.runs===null?'?':inn.runs, wkts: inn.summary&&inn.wkts===null?'?':inn.wkts, balls: inn.balls, overs: inn.summary&&inn.summaryBalls===null?'?':oversText(inn.balls), done: inn.done, endedBy: inn.endedBy,
+      summary:!!inn.summary, summaryBalls:inn.summary?inn.summaryBalls:undefined, detailsRecorded:!inn.summary,
+      target: inn.target, extras: inn.summary?null:inn.extras, extrasTotal: inn.summary?null: inn.extras.wd + inn.extras.nb + inn.extras.b + inn.extras.lb,
       rr: inn.balls ? +(inn.runs * 6 / inn.balls).toFixed(2) : 0,
       striker: inn.striker, non: inn.non, bowler: inn.bowler,
-      batting: inn.order.map((p) => ({ p, name: bp[p], ...inn.batters[p], out: inn.batters[p].out ? inn.batters[p].out.text : null, notOut: !inn.batters[p].out, onStrike: p === inn.striker, sr: inn.batters[p].balls ? Math.round(inn.batters[p].runs * 100 / inn.batters[p].balls) : 0 })),
-      yetToBat: bp.map((n, p) => ({ p, name: n })).filter((o) => !inn.batters[o.p].in),
+      batting: (inn.summary?[]:inn.order).map((p) => ({ p, name: bp[p], ...inn.batters[p], out: inn.batters[p].out ? inn.batters[p].out.text : null, notOut: !inn.batters[p].out, onStrike: p === inn.striker, sr: inn.batters[p].balls ? Math.round(inn.batters[p].runs * 100 / inn.batters[p].balls) : 0 })),
+      yetToBat: (inn.summary?[]:bp).map((n, p) => ({ p, name: n })).filter((o) => !inn.batters[o.p].in),
       bowling: Object.keys(inn.bowlers).map(Number).map((p) => { const b = inn.bowlers[p]; return { p, name: wp[p], overs: oversText(b.balls), maidens: b.maidens, runs: b.runs, wkts: b.wkts, wd: b.wd, nb: b.nb, econ: b.balls ? +(b.runs * 6 / b.balls).toFixed(1) : 0, current: p === inn.bowler }; }),
       fow: inn.fow.map((f) => ({ ...f, name: bp[f.player] })),
       ballLog: inn.log.map((l) => ({ ov: l.ov, lb: l.lb, bowler: wp[l.bowler], striker: l.striker == null ? null : bp[l.striker], non: l.non == null ? null : bp[l.non], x: l.x, r: l.r, bat: l.bat, extra: l.extra, total: l.total, tok: l.tok, out: l.w ? { k: l.w.k, who: bp[l.w.who], f: l.w.f, text: l.w.text } : null, runs: l.runs, wkts: l.wkts })),
