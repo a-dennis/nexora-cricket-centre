@@ -1471,7 +1471,9 @@ function openExtrasPlus(){
   
 }
   
-/* ---------- boot ---------- */
+var ceremonyViewerBase=viewPane;
+  
+viewPane=function(){return '<a class="btn pri" href="/m/49asxecn" id="ceremonymatch" style="display:block;text-align:center;text-decoration:none;margin-bottom:14px">Today\'s ceremonial match</a><div class="mut" style="margin-bottom:16px">Malnad Divas v Sahyadri ICONS · 7 Nov 2026</div>'+ceremonyViewerBase()};/* ---------- boot ---------- */
 if(mode==='launch')launchPage();
 else if(mode==='home')home();
 else if(mode==='t'&&new URLSearchParams(location.search).get('roster')==='1'){rosterPage()}
