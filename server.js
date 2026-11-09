@@ -157,6 +157,13 @@ async function orgSessionRecord(token){
   return rec&&rec.exp>Date.now()&&keyEq(token,rec.h)?rec:null;
 }
 async function validOrgSession(token){return !!(await orgSessionRecord(token));}
+// A saved tournament needs both organiser sign-in and its existing private key.
+// Keep only the key fingerprint, so replacing an old key invalidates saved access.
+async function savedOrgTournament(req, t) {
+  return !!(t && await validOrgSession(req.headers['x-org-session']) &&
+    (await store.getSetting('orgtour_'+t.id)) === t.keyHash);
+}
+
 // Recovery is limited to the fresh replacement ceremony. It never reveals or rotates its scorer key.
 async function canScore(req,m) {
   if (keyEq(req.headers['x-scorer-key'],m.keyHash)) return true;
@@ -269,6 +276,23 @@ async function handle(req, res) {
   // ---------- organiser sign-in for the main-screen organiser area ----------
   if (p === '/api/auth/status' && req.method === 'GET') {
     return send(res, 200, { setup: !!(await store.getSetting('orgpass')) });
+  }
+  if (p === '/api/auth/tournaments' && (req.method === 'GET' || req.method === 'POST')) {
+    if (!(await validOrgSession(req.headers['x-org-session']))) return send(res,403,{error:'Sign in as organiser first.'});
+    if (req.method === 'POST') {
+      const ip=(req.headers['x-forwarded-for']||req.socket.remoteAddress||'').split(',')[0].trim();
+      if(badAuth(ip))return send(res,429,{error:'Too many failed attempts. Try again later.'});
+      const body=await readBody(req,2000),tid=String(body&&body.tid||'');
+      const t=/^[a-z0-9]{6,12}$/.test(tid)?await store.tget(tid):null;
+      if (!t || !keyEq(body&&body.orgKey,t.keyHash)) {noteBad(ip);return send(res,403,{error:'Open this tournament on the device holding its private organiser link.'});}
+      await store.setSetting('orgtour_'+t.id,t.keyHash);
+      return send(res,200,{ok:true});
+    }
+    const tournaments=[];
+    for(const t of await store.allTournaments()) {
+      if((await store.getSetting('orgtour_'+t.id))===t.keyHash) tournaments.push({id:t.id,name:t.name});
+    }
+    return send(res,200,{tournaments});
   }
   if (p === '/api/auth/setup' && req.method === 'POST') {
     const ip = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
@@ -539,7 +563,7 @@ async function handle(req, res) {
     if (body.tournament) {
       const t = await store.tget(String(body.tournament));
       if (!t) return send(res, 404, { error: 'Tournament not found' });
-      if (!keyEq(req.headers['x-org-key'], t.keyHash)) return send(res, 403, { error: 'Only the tournament organiser can add matches.' });
+      if (!keyEq(req.headers['x-org-key'], t.keyHash) && !(await savedOrgTournament(req,t))) return send(res, 403, { error: 'Only the tournament organiser can add matches.' });
       if ((await store.byTournament(t.id)).length >= MAX_PER_TOURNAMENT) return send(res, 507, { error: 'Tournament is full.' });
       config.tid = t.id;
       const approved = cleanStoredTeams(t.teams).filter(x=>x.status==='approved');
