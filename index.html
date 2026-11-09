@@ -675,6 +675,9 @@ function roleGuide(){
 function orgPane(){
   return '<b>Organiser area</b><div id="orgarea"><span class="mut">Checking sign-in...</span></div>';
 }
+var onlineOrgTours=[];
+function matchTList(){var l=tList().slice();onlineOrgTours.forEach(function(t){if(!l.some(function(x){return x.id===t.id}))l.push({id:t.id,name:t.name,online:true})});return l}
+function loadOnlineOrgTours(){return api('GET','/api/auth/tournaments',null,null,{'x-org-session':orgSess()}).then(function(r){onlineOrgTours=r.ok&&r.j&&Array.isArray(r.j.tournaments)?r.j.tournaments:[]}).catch(function(){onlineOrgTours=[];toast('Could not load online tournament access. Try again.')})}
 function orgSess(){try{return localStorage.getItem('org_sess')||''}catch(e){return''}}
 function orgSetSess(t){try{if(t)localStorage.setItem('org_sess',t);else localStorage.removeItem('org_sess')}catch(e){}}
 function renderOrg(){
@@ -722,7 +725,7 @@ function renderOrg(){
   if(!tok){showLogin();return}
   api('POST','/api/auth/check',{token:tok}).then(function(r){
     if(!document.body.contains(area))return;
-    if(r.ok&&r.j&&r.j.ok){renderOrgArea(area);return}
+    if(r.ok&&r.j&&r.j.ok){loadOnlineOrgTours().then(function(){if(document.body.contains(area)&&orgSess()===tok)renderOrgArea(area)});return}
     orgSetSess('');showLogin();
   }).catch(function(){
     if(document.body.contains(area))area.innerHTML='<span class="mut">No connection. Tap Organiser again to retry.</span>';
@@ -748,7 +751,7 @@ function renderOrgArea(area){
   h+=matchForm()+tourInner();
   area.innerHTML=h;
   wireMatch();wireTour();wirePick();refreshNames();wireNinjaPreview();
-  document.getElementById('ogout').onclick=function(){var tok=orgSess();orgSetSess('');if(tok)api('POST','/api/auth/logout',{token:tok}).catch(function(){});renderOrg()};
+  document.getElementById('ogout').onclick=function(){var tok=orgSess();orgSetSess('');onlineOrgTours=[];if(tok)api('POST','/api/auth/logout',{token:tok}).catch(function(){});renderOrg()};
 }
 /* Private camera preview: current page only; never saved to match data or browser storage. */
 function ninjaPreviewCard(){
@@ -873,10 +876,11 @@ function home(){
   if(qt){var ob=document.querySelector('#rtabs button[data-r="org"]');if(ob)ob.click()}
 }
 function matchForm(){
-  var qt=window.homeQT||'',l=tList(),sid=qt||(l.length===1?l[0].id:'');
+  var qt=window.homeQT||'',l=matchTList(),sid=qt||(l.length===1?l[0].id:'');
   return '<div style="margin-top:18px;border-top:1px solid #e3d294;padding-top:12px"><b>Create a match</b>'+
   '<label>Match title</label><input id="title" placeholder="e.g. Match 1" maxlength="50">'+
   '<div class="two"><div><label>Match date</label><input id="date" type="date" value="'+todayStr()+'"></div><div><label>Tournament</label><select id="tsel"><option value="">None</option>'+l.map(function(t){return '<option value="'+esc(t.id)+'"'+(sid===t.id?' selected':'')+'>'+esc(t.name)+'</option>'}).join('')+'</select></div></div>'+
+  '<div id="onlineaccess" class="mut" style="margin:8px 0"></div>'+
   '<div class="two"><div><label>Overs per innings (max 10)</label><select id="overs">'+[1,2,3,4,5,6,7,8,9,10].map(function(n){return '<option'+(n===6?' selected':'')+'>'+n+'</option>'}).join('')+'</select></div>'+
   '<div><label>Batting first</label><select id="first"><option value="0">Team 1</option><option value="1">Team 2</option></select></div></div>'+
   '<div class="two"><div><label>Team 1: pick a registered team</label><select id="pick0"><option value="">Type names below instead</option></select></div><div><label>Team 2: pick a registered team</label><select id="pick1"><option value="">Type names below instead</option></select></div></div>'+
@@ -893,9 +897,9 @@ function wireMatch(){
   g.onclick=function(){
     var b=this;b.disabled=true;
     var lines=function(s){return document.getElementById(s).value.split('\n').map(function(x){return x.trim()}).filter(Boolean)};
-    var ts=tList().filter(function(t){return t.id===v('tsel')})[0];
+    var ts=matchTList().filter(function(t){return t.id===v('tsel')})[0];
     api('POST','/api/matches',{date:v('date'),tournament:ts?ts.id:undefined,title:v('title'),overs:+v('overs'),batFirst:+v('first'),wideRun:+v('wd'),nbRun:+v('nb'),maxOversPerBowler:+v('mob'),demo:false,
-      teams:[{name:v('t0'),players:lines('p0'),registrationId:document.getElementById('pick0').dataset.teamId||''},{name:v('t1'),players:lines('p1'),registrationId:document.getElementById('pick1').dataset.teamId||''}]},ts?ts.key:null).then(function(r){
+      teams:[{name:v('t0'),players:lines('p0'),registrationId:document.getElementById('pick0').dataset.teamId||''},{name:v('t1'),players:lines('p1'),registrationId:document.getElementById('pick1').dataset.teamId||''}]},ts?ts.key:null,{'x-org-session':orgSess()}).then(function(r){
       b.disabled=false;
       if(!r.ok){toast(r.j.error||'Could not create');return}
       showCreated(r.j);
@@ -1379,7 +1383,22 @@ function openWicket(){
 function wirePick(){
   var sel=document.getElementById('tsel');if(!sel)return;
   sel.onchange=function(){
-    var t=tList().filter(function(x){return x.id===sel.value})[0];
+    var t=matchTList().filter(function(x){return x.id===sel.value})[0];
+    var access=document.getElementById('onlineaccess');
+    if(access){
+      var saved=onlineOrgTours.some(function(x){return t&&x.id===t.id});
+      access.textContent=saved?'Tournament access saved online. Sign in as organiser on your other device.':'';
+      if(t&&t.key&&!saved){
+        var saveButton=document.createElement('button');saveButton.className='btn sec small';saveButton.textContent='Save this tournament access online';access.appendChild(saveButton);
+        saveButton.onclick=function(){
+          saveButton.disabled=true;
+          api('POST','/api/auth/tournaments',{tid:t.id,orgKey:t.key},null,{'x-org-session':orgSess()}).then(function(r){
+            if(!r.ok){saveButton.disabled=false;toast(r.j.error||'Could not save access');return}
+            loadOnlineOrgTours().then(function(){sel.onchange();toast('Saved online. Sign in on your other device.',1)});
+          }).catch(function(){saveButton.disabled=false;toast('No connection. Access was not confirmed saved.')});
+        };
+      }
+    }
     var base='<option value="">Type names below instead</option>';
     if(!t){var p0=document.getElementById('pick0'),p1=document.getElementById('pick1');if(p0)p0.innerHTML=base;if(p1)p1.innerHTML=base;return}
     fetch('/api/tournaments/'+t.id).then(function(r){return r.ok?r.json():null}).then(function(j){
