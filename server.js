@@ -207,7 +207,22 @@ function makeFirebaseStore(pg) {
   // the nested Firebase path is derived from it, never from a stored public tid field.
   async function fbMatchPath(id, legacyRow) {
     const pgRow = legacyRow !== undefined ? legacyRow : await pg.get(id);
-    return { path: matchPath(tidOf(pgRow && pgRow.config), id), pgRow };
+    if (pgRow) return { path: matchPath(tidOf(pgRow.config), id), pgRow };
+    // No Postgres row (replica gap or rebuild): membership is recovered from the
+    // canonical nested layout itself - practice node plus each tournament's matches
+    // node, bounded by the tournament cap. Ambiguity is loud, never guessed.
+    const homes = [];
+    const prac = await fbd.getShallow('practice');
+    if (prac && typeof prac === 'object' && prac[id]) homes.push('');
+    const tours = await fbd.getShallow('tournaments');
+    const tids = tours && typeof tours === 'object' ? Object.keys(tours) : [];
+    if (tids.length > MAX_TOURNAMENTS + 40) { const err = new Error('Tournament count exceeded safe capacity - reconcile required'); err.status = 500; throw err; }
+    for (const tid of tids) {
+      const ms = await fbd.getShallow('tournaments/' + tid + '/matches');
+      if (ms && typeof ms === 'object' && ms[id]) homes.push(tid);
+    }
+    if (homes.length > 1) { const err = new Error('Match ' + id + ' found under multiple parents - reconcile required'); err.status = 500; throw err; }
+    return { path: matchPath(homes[0] || '', id), pgRow };
   }
   async function fbMatchIds() {
     const ids = [];
@@ -831,7 +846,9 @@ const PUBLIC_NAME_MSG = 'Visible to everyone. Do not enter phone numbers or priv
 async function organiserOwnsMatch(req, m) {
   if (!(await validOrgSession(req.headers['x-org-session']))) return false;
   const tid = m.config && m.config.tid;
-  if (!tid) return true;
+  // Practice: only a match the organiser's session provably created. Tournament: the
+  // carried orgtour ownership fingerprint. A bare session alone grants nothing.
+  if (!tid) return (await store.getSetting('orgown_' + m.id)) === '1';
   const t = await store.tget(tid);
   return !!(t && (await store.getSetting('orgtour_' + tid)) === t.keyHash);
 }
@@ -1486,6 +1503,10 @@ async function handle(req, res) {
     }
     const id = rnd(8).toLowerCase(), key = rnd(14);
     const committed = await store.create({ id, config, keyHash: sha(key) });
+    // Durable creator ownership: a match created by the organiser's signed-in session
+    // carries a persisted proof so that session alone later scores/approves it; matches
+    // created without that session (open practice create) need an approved scorer device.
+    if (await validOrgSession(req.headers['x-org-session'])) await store.setSetting('orgown_' + id, '1');
     const out = { id, scorerKey: key, viewerPath: '/m/' + id, scorerPath: '/s/' + id, storage: store.kind };
     if (committed === false) { out.degraded = true; out.notice = 'Saved on the server. Firebase sync is pending.'; }
     return send(res, 201, out);
