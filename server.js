@@ -159,7 +159,39 @@ function makeStore() {
 function makeFirebaseStore(pg) {
   const fbd = require('./firebase-db');
   const iso = () => new Date().toISOString();
-  const fbMatchRec = (config, events, rev, created, updated) => ({ config, events, rev, created: created || iso(), updated: updated || iso() });
+  // Nested layout (approved): every match lives under its tournament folder, or under
+  // practice/ when it belongs to no tournament:
+  //   nexoraCentre/tournaments/<tid>/info    {name, listed, created, registration}
+  //   nexoraCentre/tournaments/<tid>/teams   {<teamId>: publicTeam}
+  //   nexoraCentre/tournaments/<tid>/matches {<mid>: public match record}
+  //   nexoraCentre/practice/<mid>            public match record
+  const tidOf = (config) => (config && typeof config.tid === 'string' && config.tid) || '';
+  const matchPath = (tid, id) => (tid ? 'tournaments/' + tid + '/matches/' + id : 'practice/' + id);
+  const matchParent = (tid) => (tid ? 'tournaments/' + tid + '/matches' : 'practice');
+  // The public match record carries ONLY the approved allowlist. Private fields
+  // (videoId/ninjaView camera links, tid, demo, registrationId, anything else present
+  // or future) never leave Postgres. Events are already field-whitelisted at ingestion.
+  const publicMatchConfig = (c) => ({
+    title: c.title, overs: c.overs,
+    teams: (c.teams || []).map((t) => ({ name: t.name, players: (t.players || []).map((p) => (typeof p === 'string' ? p : (p && p.name) || '')) })),
+    batFirst: c.batFirst, wideRun: c.wideRun, nbRun: c.nbRun, maxOversPerBowler: c.maxOversPerBowler,
+    date: c.date,
+  });
+  const PRIVATE_CONFIG_KEYS = ['videoId', 'ninjaView', 'tid', 'demo'];
+  // Serve-time merge: public state from the canonical Firebase record, private-only
+  // fields (camera links etc.) from the Postgres replica/legacy row.
+  const mergedConfig = (fbCfg, pgCfg) => {
+    const out = Object.assign({}, fbCfg);
+    for (const k of PRIVATE_CONFIG_KEYS) if (pgCfg && pgCfg[k] !== undefined) out[k] = pgCfg[k];
+    if (pgCfg && Array.isArray(pgCfg.teams) && Array.isArray(out.teams)) {
+      out.teams = out.teams.map((t, i) => {
+        const pt = pgCfg.teams[i];
+        return pt && pt.registrationId ? Object.assign({}, t, { registrationId: pt.registrationId }) : t;
+      });
+    }
+    return out;
+  };
+  const fbMatchRec = (config, events, rev, created, updated) => ({ config: publicMatchConfig(config), events, rev, created: created || iso(), updated: updated || iso() });
   // Firebase records carry PUBLIC fields only - never employee IDs or departments,
   // for ANY tournament including whxrz4tw. The PII merge join key is (team id, player
   // name lowercase): safe because no player-rename route exists; any future roster-edit
@@ -168,8 +200,25 @@ function makeFirebaseStore(pg) {
     id: t.id, name: t.name, submittedAt: t.submittedAt,
     players: (t.players || []).map((p) => ({ name: p.name, role: p.role || '' })),
   });
-  async function fbTournament(id) { const t = await fbd.get('tournaments/' + id); return t && typeof t === 'object' ? t : null; }
-  async function fbMatchIds() { const m = await fbd.getShallow('matches'); return m && typeof m === 'object' ? Object.keys(m) : []; }
+  async function fbTournament(id) { const t = await fbd.get('tournaments/' + id + '/info'); return t && typeof t === 'object' ? t : null; }
+  async function fbTournamentTeams(id) { const t = await fbd.get('tournaments/' + id + '/teams'); return t && typeof t === 'object' ? Object.values(t) : []; }
+  // Match id -> tournament membership lives in Postgres (replica/legacy row config.tid);
+  // the nested Firebase path is derived from it, never from a stored public tid field.
+  async function fbMatchPath(id, legacyRow) {
+    const pgRow = legacyRow !== undefined ? legacyRow : await pg.get(id);
+    return { path: matchPath(tidOf(pgRow && pgRow.config), id), pgRow };
+  }
+  async function fbMatchIds() {
+    const ids = [];
+    const prac = await fbd.getShallow('practice');
+    if (prac && typeof prac === 'object') ids.push(...Object.keys(prac));
+    const tours = await fbd.getShallow('tournaments');
+    for (const tid of tours && typeof tours === 'object' ? Object.keys(tours) : []) {
+      const ms = await fbd.getShallow('tournaments/' + tid + '/matches');
+      if (ms && typeof ms === 'object') ids.push(...Object.keys(ms));
+    }
+    return ids;
+  }
   const canonicalMissing = (kind, id) => { const e = new Error('Canonical Firebase record missing for ' + kind + ' ' + id); e.status = 500; e.canonical = true; return e; };
   async function matchKeyHash(id, legacyRow) {
     let keyHash = await pg.matchKeyGet(id);
@@ -188,7 +237,7 @@ function makeFirebaseStore(pg) {
     const blobTeams = legacy && Array.isArray(legacy.teams) ? legacy.teams : [];
     const blobById = {};
     for (const t of blobTeams) if (t && t.id) blobById[t.id] = t;
-    const approved = (Array.isArray(fb.teams) ? fb.teams : []).map((t) => {
+    const approved = (await fbTournamentTeams(id)).map((t) => {
       const blob = blobById[t.id] || {};
       const byName = {};
       for (const p of (blob.players || [])) if (p && p.name) byName[String(p.name).toLowerCase()] = p;
@@ -215,12 +264,20 @@ function makeFirebaseStore(pg) {
     };
   }
   async function allMatchesMerged() {
-    const fbAll = await fbd.get('matches');
-    const fbIds = fbAll && typeof fbAll === 'object' ? Object.keys(fbAll) : [];
+    const fbRecs = [];
+    const prac = await fbd.get('practice');
+    if (prac && typeof prac === 'object') for (const id of Object.keys(prac)) fbRecs.push([id, prac[id]]);
+    const tours = await fbd.getShallow('tournaments');
+    for (const tid of tours && typeof tours === 'object' ? Object.keys(tours) : []) {
+      const ms = await fbd.get('tournaments/' + tid + '/matches');
+      if (ms && typeof ms === 'object') for (const id of Object.keys(ms)) fbRecs.push([id, ms[id]]);
+    }
+    const fbIds = fbRecs.map(([id]) => id);
     const out = [];
-    for (const id of fbIds) {
-      const r = fbAll[id];
-      out.push({ id, config: r.config, events: Array.isArray(r.events) ? r.events : [], keyHash: await matchKeyHash(id), rev: r.rev || 0, updated: r.updated, created: r.created });
+    for (const [id, r] of fbRecs) {
+      if (!r || typeof r !== 'object') continue;
+      const pgRow = await pg.get(id);
+      out.push({ id, config: mergedConfig(r.config, pgRow && pgRow.config), events: Array.isArray(r.events) ? r.events : [], keyHash: await matchKeyHash(id), rev: r.rev || 0, updated: r.updated, created: r.created });
     }
     for (const m of await pg.allMatches()) if (!fbIds.includes(m.id)) out.push(m);
     return out;
@@ -236,10 +293,11 @@ function makeFirebaseStore(pg) {
     async get(id) {
       const kind0 = await pg.manifestGet(id);
       if (kind0 === 'match-degraded') return pg.get(id); // Postgres-canonical until reconcile lifts: no Firebase call (works during an outage)
-      const fb = await fbd.get('matches/' + id);
-      if (fb && typeof fb === 'object') return { id, config: fb.config, events: Array.isArray(fb.events) ? fb.events : [], keyHash: await matchKeyHash(id), rev: fb.rev || 0, updated: fb.updated, created: fb.created };
+      const { path, pgRow } = await fbMatchPath(id);
+      const fb = await fbd.get(path);
+      if (fb && typeof fb === 'object') return { id, config: mergedConfig(fb.config, pgRow && pgRow.config), events: Array.isArray(fb.events) ? fb.events : [], keyHash: await matchKeyHash(id, pgRow), rev: fb.rev || 0, updated: fb.updated, created: fb.created };
       if (kind0 === 'match') throw canonicalMissing('match', id); // was Firebase-canonical: never resurrect the stale replica
-      return pg.get(id); // true legacy
+      return pgRow; // true legacy
     },
     async count() {
       // Storage-limit guard only (not user-facing canonical data): if Firebase is
@@ -258,7 +316,7 @@ function makeFirebaseStore(pg) {
       await pg.matchKeySet(m.id, m.keyHash);
       await pg.manifestSet(m.id, 'match-degraded');
       try {
-        await fbd.put('matches/' + m.id, fbMatchRec(m.config, [], 0, iso(), iso()));
+        await fbd.put(matchPath(tidOf(m.config), m.id), fbMatchRec(m.config, [], 0, iso(), iso()));
       } catch (e) {
         await pg.importMatch({ id: m.id, config: m.config, events: [], keyHash: m.keyHash, rev: 0, created: iso(), updated: iso() });
         return false; // degraded: durable in Postgres, Firebase sync pending (reconcile lifts)
@@ -270,17 +328,19 @@ function makeFirebaseStore(pg) {
     async update(id, events, expectRev) {
       const kind0 = await pg.manifestGet(id);
       if (kind0 === 'match-degraded') return pg.update(id, events, expectRev); // Postgres-canonical until lifted
-      const g = await fbd.get('matches/' + id, true);
+      const { path, pgRow } = await fbMatchPath(id);
+      const g = await fbd.get(path, true);
       if (!g.data || typeof g.data !== 'object') {
         if (kind0 === 'match') throw canonicalMissing('match', id);
         return pg.update(id, events, expectRev);
       }
       if ((g.data.rev || 0) !== expectRev) return false;
       const next = Object.assign({}, g.data, { events, rev: expectRev + 1, updated: iso() });
-      try { await fbd.put('matches/' + id, next, g.etag || undefined); }
+      try { await fbd.put(path, next, g.etag || undefined); }
       catch (e) { if (e.status === 412) return false; throw e; }
       // Canonical commit succeeded. Replica update is best-effort; reconcile repairs drift.
-      try { await pg.exportMatchUpdate(id, next.config, events, expectRev + 1, next.updated, expectRev); }
+      // The replica keeps the FULL config (private fields) merged over the public one.
+      try { await pg.exportMatchUpdate(id, mergedConfig(next.config, pgRow && pgRow.config), events, expectRev + 1, next.updated, expectRev); }
       catch (e) { console.error('replica update failed for match ' + id + ' (reconcile repairs)', e); }
       return true;
     },
