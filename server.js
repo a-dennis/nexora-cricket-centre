@@ -889,7 +889,7 @@ async function scorerDeviceGrant(matchId, token) {
   let g = null; try { g = JSON.parse((await store.getSetting(scorerDevKey(matchId, token))) || 'null'); } catch (e) { g = null; }
   if (!g || g.matchId !== matchId) return null;
   if (g.exp && Date.parse(g.exp) < Date.now()) return null;
-  return g.status === 'approved' ? 'approved' : (g.status === 'pending' ? 'pending' : null);
+  return g.status === 'approved' ? 'approved' : (g.status === 'pending' ? 'pending' : (g.status === 'dismissed' ? 'dismissed' : null));
 }
 async function canScore(req, m) {
   if (keyEq(req.headers['x-scorer-key'], m.keyHash)) {
@@ -1303,6 +1303,7 @@ async function handle(req, res) {
     for (const r of rows) {
       let g = null; try { g = JSON.parse(r.v); } catch (e) { continue; }
       if (!g || !g.matchId) continue;
+      if (g.status === 'dismissed') continue;
       const expired = g.exp && Date.parse(g.exp) < Date.now();
       const dm = await store.get(g.matchId);
       out.push({ matchId: g.matchId, title: (dm && dm.config && dm.config.title) || '', claim: r.k.slice(-8), status: expired ? 'expired' : g.status, label: g.label || '', created: g.created, exp: g.exp });
@@ -1317,8 +1318,8 @@ async function handle(req, res) {
     const matchId = body && typeof body.matchId === 'string' ? body.matchId : '';
     const claim = body && typeof body.claim === 'string' ? body.claim : '';
     const action = body && body.action;
-    if (!/^[a-z0-9]{6,12}$/.test(matchId) || !/^[a-f0-9]{8}$/.test(claim) || (action !== 'approve' && action !== 'revoke')) {
-      return send(res, 400, { error: 'matchId, claim and action (approve|revoke) required' });
+    if (!/^[a-z0-9]{6,12}$/.test(matchId) || !/^[a-f0-9]{8}$/.test(claim) || (action !== 'approve' && action !== 'revoke' && action !== 'dismiss')) {
+      return send(res, 400, { error: 'matchId, claim and action (approve|revoke|dismiss) required' });
     }
     const m = await store.get(matchId);
     if (!m) return send(res, 404, { error: 'Match not found' });
@@ -1328,9 +1329,10 @@ async function handle(req, res) {
     if (!row) return send(res, 404, { error: 'Claim not found' });
     let g = null; try { g = JSON.parse(row.v); } catch (e) { g = null; }
     if (!g) return send(res, 404, { error: 'Claim not found' });
-    g.status = action === 'approve' ? 'approved' : 'revoked';
+    if (action === 'dismiss' && g.status !== 'pending') return send(res, 409, { error: 'Only a claim still waiting for approval can be dismissed.' });
+    g.status = action === 'approve' ? 'approved' : (action === 'dismiss' ? 'dismissed' : 'revoked');
     await store.setSetting(row.k, JSON.stringify(g));
-    auditOrg(action === 'approve' ? 'scorer_device_approved' : 'scorer_device_revoked', { match: matchId, claim });
+    auditOrg(action === 'approve' ? 'scorer_device_approved' : (action === 'dismiss' ? 'scorer_device_dismissed' : 'scorer_device_revoked'), { match: matchId, claim });
     return send(res, 200, { ok: true, status: g.status });
   }
   if ((mt = p.match(/^\/api\/matches\/([a-z0-9]{6,12})\/backup$/)) && req.method === 'GET') {
