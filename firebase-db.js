@@ -67,7 +67,8 @@ async function getToken() {
 // Returns { status, data, etag }. Throws on transport errors only.
 async function raw(method, path, body, opts) {
   const t = await getToken();
-  const url = dbUrl() + '/' + ROOT + '/' + path + '.json?auth=' + encodeURIComponent(t);
+  let url = dbUrl() + '/' + ROOT + '/' + path + '.json?auth=' + encodeURIComponent(t);
+  if (process.env.FB_NS) url += '&ns=' + encodeURIComponent(process.env.FB_NS); // emulator namespace (never set in production)
   const headers = {};
   if (body !== undefined) headers['content-type'] = 'application/json';
   if (opts && opts.ifMatch) headers['If-Match'] = opts.ifMatch;
