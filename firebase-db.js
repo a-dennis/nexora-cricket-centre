@@ -127,23 +127,25 @@ module.exports = {
   },
   // Bounded server-side filtered read: orderBy a child/value with equality.
   // Callers MUST re-filter results client-side (emulators/mocks may ignore the filter).
-  async query(path, orderByChild, equalToValue) {
+  async query(path, orderByChild, equalToValue, retried) {
     const t = await getToken();
     let url = dbUrl() + '/' + ROOT + '/' + path + '.json?auth=' + encodeURIComponent(t)
       + '&orderBy=' + encodeURIComponent(JSON.stringify(orderByChild))
       + '&equalTo=' + encodeURIComponent(JSON.stringify(equalToValue));
     if (process.env.FB_NS) url += '&ns=' + encodeURIComponent(process.env.FB_NS);
     const r = await fetch(url, { signal: AbortSignal.timeout(15000) });
-    if (r.status === 401 || r.status === 403) { idToken = null; const t2 = await getToken(); return this.query(path, orderByChild, equalToValue); }
+    if ((r.status === 401 || r.status === 403) && !retried) { idToken = null; await getToken(); return this.query(path, orderByChild, equalToValue, true); }
     if (!r.ok) { const err = new Error('Firebase query ' + path + ' -> ' + r.status); err.status = r.status; throw err; }
     return r.json();
   },
   // Shallow listing (keys/true values only) for bounded counts and id sets.
-  async getShallow(path) {
+  // Auth refresh retry is capped at exactly one, same as query().
+  async getShallow(path, retried) {
     const t = await getToken();
     let url = dbUrl() + '/' + ROOT + '/' + path + '.json?auth=' + encodeURIComponent(t) + '&shallow=true';
     if (process.env.FB_NS) url += '&ns=' + encodeURIComponent(process.env.FB_NS);
     const r = await fetch(url, { signal: AbortSignal.timeout(15000) });
+    if ((r.status === 401 || r.status === 403) && !retried) { idToken = null; await getToken(); return this.getShallow(path, true); }
     if (!r.ok) { const err = new Error('Firebase shallow ' + path + ' -> ' + r.status); err.status = r.status; throw err; }
     return r.json();
   },

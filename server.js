@@ -73,6 +73,9 @@ function makePgStore() {
       async tsetReg(id, regKeyHash) { await tready; await pool.query('UPDATE cricket_tournaments SET reg_key_hash=$2 WHERE id=$1', [id, regKeyHash]); },
       async getSetting(k) { await sready; const r = await pool.query('SELECT v FROM cricket_settings WHERE k=$1', [k]); return r.rows[0] ? r.rows[0].v : null; },
       async setSetting(k, v) { await sready; if (v === null) { await pool.query('DELETE FROM cricket_settings WHERE k=$1', [k]); return; } await pool.query('INSERT INTO cricket_settings(k,v) VALUES($1,$2) ON CONFLICT (k) DO UPDATE SET v=$2', [k, v]); },
+      async clearSettings(prefix, keepKey) { await sready; if (keepKey) await pool.query('DELETE FROM cricket_settings WHERE k LIKE $1 AND k <> $2', [prefix + '%', keepKey]); else await pool.query('DELETE FROM cricket_settings WHERE k LIKE $1', [prefix + '%']); },
+      async listSettings(prefix) { await sready; const r = await pool.query('SELECT k, v FROM cricket_settings WHERE k LIKE $1', [prefix + '%']); return r.rows; },
+      async tsetKey(id, keyHash) { await tready; const r = await pool.query('UPDATE cricket_tournaments SET key_hash=$2 WHERE id=$1', [id, keyHash]); return r.rowCount === 1; },
       async tsetListed(id, listed) { await tready; const r = await pool.query('UPDATE cricket_tournaments SET listed=$2 WHERE id=$1', [id, !!listed]); return r.rowCount === 1; },
       async listedTournaments() { await tready; const r = await pool.query('SELECT id,name FROM cricket_tournaments WHERE listed ORDER BY created_at'); return r.rows.map((x) => ({ id: x.id, name: x.name })); },
       async trename(id, name) { await tready; const r = await pool.query('UPDATE cricket_tournaments SET name=$2 WHERE id=$1', [id, name]); return r.rowCount === 1; },
@@ -128,6 +131,9 @@ function makeFileStore() {
     async tsetReg(id, regKeyHash) { if (tdb[id]) { tdb[id].regKeyHash = regKeyHash; tsave(); } },
     async getSetting(k) { return sdb[k] !== undefined ? sdb[k] : null; },
     async setSetting(k, v) { if (v === null) { delete sdb[k]; } else { sdb[k] = v; } ssave(); },
+    async clearSettings(prefix, keepKey) { for (const k of Object.keys(sdb)) { if (k.startsWith(prefix) && k !== keepKey) delete sdb[k]; } ssave(); },
+    async listSettings(prefix) { return Object.keys(sdb).filter((k) => k.startsWith(prefix)).map((k) => ({ k, v: sdb[k] })); },
+    async tsetKey(id, keyHash) { if (!tdb[id]) return false; tdb[id].keyHash = keyHash; tsave(); return true; },
     async tsetListed(id, listed) { if (!tdb[id]) return false; tdb[id].listed = !!listed; tsave(); return true; },
     async listedTournaments() { return Object.values(tdb).filter((t) => t.listed).map((t) => ({ id: t.id, name: t.name })); },
     async tcount() { return Object.keys(tdb).length; },
@@ -223,6 +229,10 @@ function makeFirebaseStore(pg) {
     kind: 'durable',
     getSetting: (k) => pg.getSetting(k),
     setSetting: (k, v) => pg.setSetting(k, v),
+    clearSettings: (prefix, keepKey) => pg.clearSettings(prefix, keepKey),
+    listSettings: (prefix) => pg.listSettings(prefix),
+    // Organiser keys are secrets: they live in Postgres only, never in Firebase.
+    tsetKey: (id, keyHash) => pg.tsetKey(id, keyHash),
     async get(id) {
       const kind0 = await pg.manifestGet(id);
       if (kind0 === 'match-degraded') return pg.get(id); // Postgres-canonical until reconcile lifts: no Firebase call (works during an outage)
@@ -680,6 +690,58 @@ async function savedOrgTournament(req, t) {
   return !!(t && await validOrgSession(req.headers['x-org-session']) &&
     (await store.getSetting('orgtour_'+t.id)) === t.keyHash);
 }
+// Organiser mutations need BOTH a signed-in session and the tournament's organiser
+// link on the request - a link alone (or a login alone) mutates nothing.
+async function orgAuthed(req, t) {
+  return !!(t && (await validOrgSession(req.headers['x-org-session'])) && keyEq(req.headers['x-org-key'], t.keyHash));
+}
+// --- Organiser password policy ---
+// v:2 marks a password set under the 10-character minimum. Anything older is
+// "legacy": the scrypt hash cannot reveal its length or strength, so every
+// pre-policy password is treated as unverified and must be replaced (he types it
+// himself) before organiser console actions. Sign-in and the change itself keep
+// working with the current password or an existing session - never a hard lockout.
+async function orgpassRec() { let ph = null; try { ph = JSON.parse((await store.getSetting('orgpass')) || 'null'); } catch (e) { ph = null; } return ph && ph.salt && ph.hash ? ph : null; }
+async function orgpassLegacy() { const ph = await orgpassRec(); return !!(ph && ph.v !== 2); }
+// Security audit trail (orgaudit_YYYY-MM-DD settings rows): times + event names + IP
+// only - never passwords, tokens, links or key material.
+async function auditOrg(event, detail) {
+  try {
+    const k = 'orgaudit_' + new Date().toISOString().slice(0, 10);
+    const cur = (await store.getSetting(k)) || '';
+    if (cur.length > 60000) return;
+    await store.setSetting(k, (cur ? cur + '\n' : '') + JSON.stringify(Object.assign({ at: new Date().toISOString(), event }, detail || {})));
+  } catch (e) { console.error('audit write failed', e && e.message); }
+}
+// Wrong-sign-in protection: 5 consecutive failures from one connection block sign-in
+// for 5 minutes. Persisted in the settings store so a restart keeps the block; a
+// successful sign-in clears the counter. The generic 10/hour badAuth backstop stays.
+const LOGIN_MAX_FAILS = 5, LOGIN_FAIL_WINDOW = 10 * 60e3, LOGIN_BLOCK_MS = 5 * 60e3;
+const loginLockMem = new Map(); // fallback if the settings store itself errors
+async function loginLockGet(ip) { try { const r = await store.getSetting('loginlock_' + ip); return r ? JSON.parse(r) : null; } catch (e) { return loginLockMem.get(ip) || null; } }
+async function loginLockSet(ip, v) { try { await store.setSetting('loginlock_' + ip, v ? JSON.stringify(v) : null); } catch (e) { if (v) loginLockMem.set(ip, v); else loginLockMem.delete(ip); } }
+async function loginBlocked(ip) { const r = await loginLockGet(ip); return !!(r && r.until && r.until > Date.now()); }
+async function loginNoteFail(ip) {
+  const now = Date.now();
+  const r = (await loginLockGet(ip)) || { fails: [], until: 0 };
+  if (r.until && r.until > now) return; // already blocked; the 429 path reports it
+  const fails = (r.fails || []).filter((t) => now - t < LOGIN_FAIL_WINDOW);
+  fails.push(now);
+  if (fails.length >= LOGIN_MAX_FAILS) { await loginLockSet(ip, { fails: [], until: now + LOGIN_BLOCK_MS }); auditOrg('login_blocked', { ip }); }
+  else await loginLockSet(ip, { fails, until: 0 });
+}
+async function loginNoteOk(ip) { await loginLockSet(ip, null); }
+// Typed public names land in world-readable Firebase records. Reject obvious
+// employee-ID / email / phone shapes. Heuristic only - not a personal-data detector.
+function publicNameProblem(s) {
+  const v = String(s || '');
+  if (/@/.test(v)) return 'looks like an email address';
+  if (/(?:\+?\d[\d\s().-]{6,}\d)/.test(v)) return 'looks like a phone number';
+  if (/^\d{4,}$/.test(v.trim())) return 'looks like an ID number';
+  if (/\b(emp|employee|id)\s*[:#-]?\s*[a-z]*\d{3,}\b/i.test(v)) return 'looks like an ID number';
+  return null;
+}
+const PUBLIC_NAME_MSG = 'Visible to everyone. Do not enter phone numbers or private details.';
 
 // Recovery is limited to the fresh replacement ceremony. It never reveals or rotates its scorer key.
 async function canScore(req,m) {
@@ -728,6 +790,7 @@ function cleanTeamReg(body) {
     else if (pl.role === 'vc') { if (seenV) pl.role = ''; else seenV = true; }
   }
   if (!name) return { error: 'Enter a team name' };
+  if (publicNameProblem(name) || players.some((pl) => publicNameProblem(pl.name))) return { error: PUBLIC_NAME_MSG };
   if (players.length < MIN_TEAM_PLAYERS) return { error: 'Add at least ' + MIN_TEAM_PLAYERS + ' players with their employee IDs' };
   if (players.length > 15) return { error: 'A team can have at most 15 players' };
   return { name, players };
@@ -796,6 +859,7 @@ async function handle(req, res) {
   }
   if (p === '/api/auth/tournaments' && (req.method === 'GET' || req.method === 'POST')) {
     if (!(await validOrgSession(req.headers['x-org-session']))) return send(res,403,{error:'Sign in as organiser first.'});
+    if (await orgpassLegacy()) return send(res,409,{error:'Set a new password (10+ characters) first.',code:'reset_required'});
     if (req.method === 'POST') {
       const ip=(req.headers['x-forwarded-for']||req.socket.remoteAddress||'').split(',')[0].trim();
       if(badAuth(ip))return send(res,429,{error:'Too many failed attempts. Try again later.'});
@@ -805,46 +869,77 @@ async function handle(req, res) {
       await store.setSetting('orgtour_'+t.id,t.keyHash);
       return send(res,200,{ok:true});
     }
+    // All tournaments are listed so the console can re-establish organiser links after
+    // a rotation; 'saved' marks the ones whose current link fingerprint this account holds.
     const tournaments=[];
     for(const t of await store.allTournaments()) {
-      if((await store.getSetting('orgtour_'+t.id))===t.keyHash) tournaments.push({id:t.id,name:t.name});
+      tournaments.push({id:t.id,name:t.name,saved:(await store.getSetting('orgtour_'+t.id))===t.keyHash});
     }
     return send(res,200,{tournaments});
   }
   if (p === '/api/auth/setup' && req.method === 'POST') {
     const ip = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
     if (badAuth(ip)) return send(res, 429, { error: 'Too many failed attempts. Try again later.' });
+    // Bootstrap only: an organiser link can set the FIRST password, never replace an
+    // existing one. Replacing requires a signed-in session (change-password below).
+    if (await orgpassRec()) return send(res, 409, { error: 'Password is already set. Change it from the organiser area after signing in.' });
     const body = await readBody(req, 2e3);
     const tid = String((body && body.tid) || '');
     const t = /^[a-z0-9]{6,12}$/.test(tid) ? await store.tget(tid) : null;
     if (!t || !keyEq(body && body.orgKey, t.keyHash)) { noteBad(ip); return send(res, 403, { error: 'A valid organiser link on this device is needed to set the password' }); }
     const pw = String((body && body.password) || '');
-    if (pw.length < 4 || pw.length > 72) return send(res, 400, { error: 'Password needs 4 to 72 characters' });
+    if (pw.length < 10 || pw.length > 72) return send(res, 400, { error: 'Password needs 10 to 72 characters' });
     const salt = rnd(16);
     const hash = crypto.scryptSync(pw, salt, 32).toString('hex');
-    await store.setSetting('orgpass', JSON.stringify({ salt, hash }));
+    await store.setSetting('orgpass', JSON.stringify({ salt, hash, v: 2 }));
+    auditOrg('password_bootstrapped', { ip });
+    return send(res, 200, { ok: true });
+  }
+  if (p === '/api/auth/change-password' && req.method === 'POST') {
+    const ip = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
+    if (badAuth(ip)) return send(res, 429, { error: 'Too many failed attempts. Try again later.' });
+    if (!(await orgpassRec())) return send(res, 409, { error: 'Sign-in is not set up yet' });
+    const token = req.headers['x-org-session'];
+    if (!(await validOrgSession(token))) return send(res, 403, { error: 'Sign in as organiser first.' });
+    const body = await readBody(req, 2e3);
+    const pw = String((body && body.password) || '');
+    if (pw.length < 10 || pw.length > 72) return send(res, 400, { error: 'Password needs 10 to 72 characters' });
+    const salt = rnd(16);
+    const hash = crypto.scryptSync(pw, salt, 32).toString('hex');
+    await store.setSetting('orgpass', JSON.stringify({ salt, hash, v: 2 }));
+    // His rule: every OTHER device signs out; this device keeps its session. If the
+    // caller's valid session is the legacy shared record, re-mint it in the current
+    // per-token format first so the caller is not signed out with it.
+    const keep = 'orgsess_' + sha(token);
+    let shared = null; try { shared = JSON.parse((await store.getSetting('orgsess')) || 'null'); } catch (e) { shared = null; }
+    if (shared && shared.exp > Date.now() && keyEq(token, shared.h)) await store.setSetting(keep, JSON.stringify({ h: sha(token), exp: shared.exp }));
+    await store.clearSettings('orgsess_', keep);
+    await store.setSetting('orgsess', null);
+    auditOrg('password_changed', { ip });
     return send(res, 200, { ok: true });
   }
   if (p === '/api/auth/login' && req.method === 'POST') {
     const ip = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
+    if (await loginBlocked(ip)) return send(res, 429, { error: 'Too many wrong tries. Wait 5 minutes and try again.' });
     if (badAuth(ip)) return send(res, 429, { error: 'Too many failed attempts. Try again later.' });
     const body = await readBody(req, 2e3);
-    const rec = await store.getSetting('orgpass');
-    if (!rec) return send(res, 409, { error: 'Sign-in is not set up yet' });
-    let ph = null; try { ph = JSON.parse(rec); } catch (e) { ph = null; }
+    const ph = await orgpassRec();
+    if (!ph) return send(res, 409, { error: 'Sign-in is not set up yet' });
     const user = String((body && body.user) || '').trim().toLowerCase();
     const pw = String((body && body.password) || '');
-    const ok = !!(ph && user === 'denny' && pw.length > 0 && pw.length <= 72 &&
+    const ok = !!(user === 'denny' && pw.length > 0 && pw.length <= 72 &&
       crypto.timingSafeEqual(Buffer.from(crypto.scryptSync(pw, ph.salt, 32).toString('hex')), Buffer.from(String(ph.hash))));
-    if (!ok) { noteBad(ip); return send(res, 403, { error: 'Wrong username or password' }); }
+    if (!ok) { noteBad(ip); await loginNoteFail(ip); auditOrg('login_failed', { ip }); return send(res, 403, { error: 'Wrong username or password' }); }
+    await loginNoteOk(ip);
     const token = rnd(24);
     await store.setSetting('orgsess_'+sha(token),JSON.stringify({h:sha(token),exp:Date.now()+30*864e5}));
-    return send(res, 200, { ok: true, token });
+    auditOrg('login_ok', { ip });
+    return send(res, 200, { ok: true, token, resetRequired: ph.v !== 2 });
   }
   if (p === '/api/auth/check' && req.method === 'POST') {
     const body = await readBody(req, 2e3);
     const ok=await validOrgSession(body&&body.token);
-    return send(res, 200, { ok });
+    return send(res, 200, { ok, resetRequired: ok ? await orgpassLegacy() : false });
   }
   if (p === '/api/auth/logout' && req.method === 'POST') {
     const body=await readBody(req,2e3),token=body&&body.token;
@@ -855,13 +950,47 @@ async function handle(req, res) {
     return send(res, 200, { ok: true });
   }
   let mt;
-  if (p === '/api/admin/delete-match' || p === '/api/backup' || p === '/api/restore' || p === '/api/admin/tournament-name' || p === '/api/admin/tournament-listed' || p === '/api/admin/replace-matches' || p === '/api/admin/firebase-migrate' || p === '/api/admin/firebase-reconcile') {
+  if (p === '/api/admin/delete-match' || p === '/api/backup' || p === '/api/restore' || p === '/api/admin/tournament-name' || p === '/api/admin/tournament-listed' || p === '/api/admin/replace-matches' || p === '/api/admin/firebase-migrate' || p === '/api/admin/firebase-reconcile' || p === '/api/admin/security-state' || p === '/api/admin/rotate-organiser-keys') {
     // Owner-only. Disabled unless BACKUP_TOKEN is set. Backups contain match data and hashed keys, never raw keys.
     const tok = process.env.BACKUP_TOKEN;
     if (!tok || tok.length < 24) return send(res, 404, { error: 'Unknown API' });
     const ip = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
     if (badAuth(ip)) return send(res, 429, { error: 'Too many failed attempts. Try again later.' });
     if (!keyEq(req.headers['x-backup-token'], sha(tok))) { noteBad(ip); return send(res, 403, { error: 'Not allowed' }); }
+    if (p === '/api/admin/security-state' && req.method === 'GET') {
+      // Safe inspection for the security review: counts and expiry times only -
+      // never tokens, hashes, passwords or link material.
+      const ph = await orgpassRec();
+      const sess = await store.listSettings('orgsess');
+      const sessions = [];
+      for (const row of sess) {
+        let rec = null; try { rec = JSON.parse(row.v); } catch (e) { rec = null; }
+        sessions.push({ kind: row.k === 'orgsess' ? 'legacy-shared' : 'token', expires: rec && rec.exp ? new Date(rec.exp).toISOString() : null });
+      }
+      const locks = (await store.listSettings('loginlock_')).map((row) => { let r = null; try { r = JSON.parse(row.v); } catch (e) { r = null; } return { ip: row.k.slice('loginlock_'.length), blockedUntil: r && r.until ? new Date(r.until).toISOString() : null, recentFails: r && r.fails ? r.fails.length : 0 }; });
+      return send(res, 200, { passwordSet: !!ph, passwordVersion: ph && ph.v === 2 ? 2 : ph ? 1 : null, sessions, loginLocks: locks });
+    }
+    if (p === '/api/admin/rotate-organiser-keys' && req.method === 'POST') {
+      // His explicit request: cancel every existing tournament organiser link at
+      // cutover. New random keyHashes are stored and the raw keys DISCARDED - every
+      // old link dies immediately and no valid link exists until he creates a new one
+      // himself from the signed-in organiser console (organiser-link route below).
+      // Touches organiser keys only: scorer, registration and viewer links unchanged,
+      // no tournament/match/team data modified.
+      const ts = await store.allTournaments();
+      let rotated = 0;
+      for (const t of ts) {
+        const newHash = sha(rnd(14)); // raw key discarded: every old link dies, no valid link remains
+        if (await store.tsetKey(t.id, newHash)) {
+          // Same operation: an existing saved fingerprint moves to the new hash, so the
+          // signed-in owner's saved access survives rotation; no new device is authorised.
+          if ((await store.getSetting('orgtour_' + t.id)) === t.keyHash) await store.setSetting('orgtour_' + t.id, newHash);
+          rotated++;
+        }
+      }
+      auditOrg('organiser_keys_invalidated', { count: rotated });
+      return send(res, 200, { ok: true, rotated });
+    }
     if (p === '/api/backup' && req.method === 'GET') {
       const [ms, ts] = [await store.allMatches(), await store.allTournaments()];
       return send(res, 200, { format: 'cricket-backup', version: 1, exportedAt: new Date().toISOString(), storage: store.kind,
@@ -967,12 +1096,21 @@ async function handle(req, res) {
   if (req.method === 'POST' && p === '/api/tournaments') {
     const ip = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
     if (limited(ip)) return send(res, 429, { error: 'Too many requests from this connection. Try again later.' });
+    // Bootstrap: before the FIRST password exists, tournament creation is open so the
+    // first organiser link can exist for the setup ceremony. Once any password is set
+    // (always the case in production), creation needs a signed-in, post-reset session.
+    if (await orgpassRec()) {
+      if (!(await validOrgSession(req.headers['x-org-session']))) return send(res, 403, { error: 'Sign in as organiser first.' });
+      if (await orgpassLegacy()) return send(res, 409, { error: 'Set a new password (10+ characters) first.', code: 'reset_required' });
+    }
     if ((await store.tcount()) >= MAX_TOURNAMENTS) return send(res, 507, { error: 'Storage limit reached.' });
     const body = await readBody(req);
     const name = engine.cleanName(body.name, 40);
     if (!name) return send(res, 400, { error: 'Enter a tournament name' });
+    if (publicNameProblem(name)) return send(res, 400, { error: PUBLIC_NAME_MSG });
     const id = rnd(8).toLowerCase(), key = rnd(14);
     const committed = await store.tcreate({ id, name, keyHash: sha(key) });
+    await store.setSetting('orgtour_' + id, sha(key));
     const out = { id, name, orgKey: key, calendarPath: '/t/' + id };
     if (committed === false) { out.degraded = true; out.notice = 'Saved on the server. Firebase sync is pending.'; }
     return send(res, 201, out);
@@ -990,7 +1128,7 @@ async function handle(req, res) {
     if (badAuth(ip)) return send(res, 429, { error: 'Too many failed attempts. Try again later.' });
     const t = await store.tget(mt[1]);
     if (!t) return send(res, 404, { error: 'Tournament not found' });
-    if (!keyEq(req.headers['x-org-key'], t.keyHash)) { noteBad(ip); return send(res, 403, { error: 'Only the organiser link can download the tournament backup.' }); }
+    if (!(await orgAuthed(req, t))) { noteBad(ip); return send(res, 403, { error: 'Sign in as organiser on the device holding this tournament organiser link.' }); }
     const ms = await store.byTournament(t.id);
     return send(res, 200, { format: 'cricket-backup', version: 1, exportedAt: new Date().toISOString(), storage: store.kind, counts: { matches: ms.length, tournaments: 1 }, tournaments: [{ id: t.id, name: t.name, keyHash: t.keyHash, teams: cleanStoredTeams(t.teams), regKeyHash: t.regKeyHash || null }], matches: ms.map((m) => ({ id: m.id, config: m.config, events: m.events, keyHash: m.keyHash, rev: m.rev, updated: m.updated })) });
   }
@@ -1026,7 +1164,7 @@ async function handle(req, res) {
     if (badAuth(ip)) return send(res, 429, { error: 'Too many failed attempts. Try again later.' });
     const t = await store.tget(mt[1]);
     if (!t) return send(res, 404, { error: 'Tournament not found' });
-    if (!keyEq(req.headers['x-org-key'], t.keyHash)) { noteBad(ip); return send(res, 403, { error: 'Only the tournament organiser can manage team registration.' }); }
+    if (!(await orgAuthed(req, t))) { noteBad(ip); return send(res, 403, { error: 'Sign in as organiser on the device holding this tournament organiser link.' }); }
     const body = await readBody(req, 2e3);
     const rk = String(body && body.regKey || '');
     if (!rk) { await store.tsetReg(t.id, null); return send(res, 200, { ok: true, registration: 'closed' }); }
@@ -1034,12 +1172,31 @@ async function handle(req, res) {
     await store.tsetReg(t.id, sha(rk));
     return send(res, 200, { ok: true, registration: 'open' });
   }
+  if ((mt = p.match(/^\/api\/tournaments\/([a-z0-9]{6,12})\/organiser-link$/)) && req.method === 'POST') {
+    // His private retrieval path after rotation: a signed-in, post-reset session creates
+    // a FRESH organiser link for one tournament. The old link for that tournament dies
+    // here. The raw key is returned once, to this signed-in device only - it is never
+    // logged, never stored readable, and never sent anywhere else. Saved access
+    // (orgtour_ fingerprint) moves to the new key in the same operation.
+    const ip = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
+    if (badAuth(ip)) return send(res, 429, { error: 'Too many failed attempts. Try again later.' });
+    if (!(await validOrgSession(req.headers['x-org-session']))) return send(res, 403, { error: 'Sign in as organiser first.' });
+    if (await orgpassLegacy()) return send(res, 409, { error: 'Set a new password (10+ characters) first.', code: 'reset_required' });
+    const t = await store.tget(mt[1]);
+    if (!t) return send(res, 404, { error: 'Tournament not found' });
+    const key = rnd(14);
+    const h = sha(key);
+    if (!(await store.tsetKey(t.id, h))) return send(res, 500, { error: 'Could not create the link. Try again.' });
+    await store.setSetting('orgtour_' + t.id, h);
+    auditOrg('organiser_link_created', { ip, tournament: t.id });
+    return send(res, 200, { ok: true, id: t.id, orgKey: key, organiserPath: '/t/' + t.id + '?key=' + key });
+  }
   if ((mt = p.match(/^\/api\/tournaments\/([a-z0-9]{6,12})\/listed$/)) && req.method === 'POST') {
     const ip = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
     if (badAuth(ip)) return send(res, 429, { error: 'Too many failed attempts. Try again later.' });
     const t = await store.tget(mt[1]);
     if (!t) return send(res, 404, { error: 'Tournament not found' });
-    if (!keyEq(req.headers['x-org-key'], t.keyHash)) { noteBad(ip); return send(res, 403, { error: 'Only the tournament organiser can change home listing.' }); }
+    if (!(await orgAuthed(req, t))) { noteBad(ip); return send(res, 403, { error: 'Sign in as organiser on the device holding this tournament organiser link.' }); }
     const body = await readBody(req, 2e3);
     await store.tsetListed(t.id, !!(body && body.listed));
     return send(res, 200, { ok: true, listed: !!(body && body.listed) });
@@ -1070,7 +1227,7 @@ async function handle(req, res) {
     if (badAuth(ip)) return send(res, 429, { error: 'Too many failed attempts. Try again later.' });
     const t = await store.tget(mt[1]);
     if (!t) return send(res, 404, { error: 'Tournament not found' });
-    if (!keyEq(req.headers['x-org-key'], t.keyHash)) { noteBad(ip); return send(res, 403, { error: 'Only the tournament organiser can review teams.' }); }
+    if (!(await orgAuthed(req, t))) { noteBad(ip); return send(res, 403, { error: 'Sign in as organiser on the device holding this tournament organiser link.' }); }
     const body = await readBody(req, 2e3);
     let notFound = false, badAction = false, badPlayer = false;
     const okm = await store.tmutateTeams(t.id, (teams) => {
@@ -1102,7 +1259,7 @@ async function handle(req, res) {
     const body = await readBody(req);
     const t = await store.tget(String(body.tournament || ''));
     if (!t) return send(res, 404, { error: 'Tournament not found' });
-    if (!keyEq(req.headers['x-org-key'], t.keyHash)) return send(res, 403, { error: 'Only the tournament organiser can add matches.' });
+    if (!(await orgAuthed(req, t))) return send(res, 403, { error: 'Sign in as organiser on the device holding this tournament organiser link.' });
     if (m.config.tid && m.config.tid !== t.id) return send(res, 409, { error: 'This match already belongs to a tournament.' });
     if (!m.config.tid && (await store.byTournament(t.id)).length >= MAX_PER_TOURNAMENT) return send(res, 507, { error: 'Tournament is full.' });
     const config = Object.assign({}, m.config, { tid: t.id, date: cleanDate(body.date || m.config.date) });
@@ -1135,6 +1292,9 @@ async function handle(req, res) {
     if ((await store.count()) >= MAX_MATCHES) return send(res, 507, { error: 'Storage limit reached for the free trial.' });
     const body = await readBody(req);
     const config = engine.normalizeConfig(body);
+    // Names typed here land in world-readable Firebase records (PUBLIC_NAME_MSG).
+    const nameFields = [config.title].concat(config.teams.map((t) => t.name), ...config.teams.map((t) => t.players));
+    if (nameFields.some((s) => publicNameProblem(s))) return send(res, 400, { error: PUBLIC_NAME_MSG });
     config.date = cleanDate(body.date);
     if (body.tournament) {
       // Tournament-linked create needs the canonical roster to authorise and de-dupe.
@@ -1145,7 +1305,7 @@ async function handle(req, res) {
       try { t = await store.tget(String(body.tournament)); }
       catch (e) { if (e && e.canonical) throw e; return send(res, 503, { error: 'The live store is unreachable right now, so tournament matches cannot be created. Try again shortly.' }); }
       if (!t) return send(res, 404, { error: 'Tournament not found' });
-      if (!keyEq(req.headers['x-org-key'], t.keyHash) && !(await savedOrgTournament(req,t))) return send(res, 403, { error: 'Only the tournament organiser can add matches.' });
+      if (!(await orgAuthed(req, t)) && !(await savedOrgTournament(req,t))) return send(res, 403, { error: 'Sign in as organiser on the device holding this tournament organiser link.' });
       let curCount;
       try { curCount = (await store.byTournament(t.id)).length; }
       catch (e) { if (e && e.canonical) throw e; return send(res, 503, { error: 'The live store is unreachable right now, so tournament matches cannot be created. Try again shortly.' }); }
