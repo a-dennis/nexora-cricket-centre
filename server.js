@@ -146,6 +146,42 @@ function makeFileStore() {
     async update(id, events, expectRev) { const m = db[id]; if (!m || m.rev !== expectRev) return false; m.events = events; m.rev++; m.updated = new Date().toISOString(); save(); return true; },
   };
 }
+const tidOf = (config) => (config && typeof config.tid === 'string' && config.tid) || '';
+const matchPath = (tid, id) => (tid ? 'tournaments/' + tid + '/matches/' + id : 'practice/' + id);
+const matchParent = (tid) => (tid ? 'tournaments/' + tid + '/matches' : 'practice');
+  // The public match record carries ONLY the approved allowlist. Private fields
+  // (videoId/ninjaView camera links, tid, demo, registrationId, anything else present
+  // or future) never leave Postgres. Events are already field-whitelisted at ingestion.
+const publicMatchConfig = (c) => ({
+  title: c.title, overs: c.overs,
+  teams: (c.teams || []).map((t) => ({ name: t.name, players: (t.players || []).map((p) => (typeof p === 'string' ? p : (p && p.name) || '')) })),
+  batFirst: c.batFirst, wideRun: c.wideRun, nbRun: c.nbRun, maxOversPerBowler: c.maxOversPerBowler,
+  date: c.date,
+  });
+const PRIVATE_CONFIG_KEYS = ['videoId', 'ninjaView', 'tid', 'demo'];
+  // Serve-time merge: public state from the canonical Firebase record, private-only
+  // fields (camera links etc.) from the Postgres replica/legacy row.
+const mergedConfig = (fbCfg, pgCfg) => {
+  const out = Object.assign({}, fbCfg);
+  for (const k of PRIVATE_CONFIG_KEYS) if (pgCfg && pgCfg[k] !== undefined) out[k] = pgCfg[k];
+  if (pgCfg && Array.isArray(pgCfg.teams) && Array.isArray(out.teams)) {
+    out.teams = out.teams.map((t, i) => {
+    const pt = pgCfg.teams[i];
+    return pt && pt.registrationId ? Object.assign({}, t, { registrationId: pt.registrationId }) : t;
+    });
+  }
+  return out;
+  };
+const fbMatchRec = (config, events, rev, created, updated) => ({ config: publicMatchConfig(config), events, rev, created: created || iso(), updated: updated || iso() });
+  // Firebase records carry PUBLIC fields only - never employee IDs or departments,
+  // for ANY tournament including whxrz4tw. The PII merge join key is (team id, player
+  // name lowercase): safe because no player-rename route exists; any future roster-edit
+  // feature must thread empId through the mutation or this join breaks silently.
+const publicTeam = (t) => ({
+  id: t.id, name: t.name, submittedAt: t.submittedAt,
+  players: (t.players || []).map((p) => ({ name: p.name, role: p.role || '' })),
+  });
+
 function makeStore() {
   const pg = process.env.DATABASE_URL ? makePgStore() : null;
   if (pg && process.env.FIREBASE_USER_EMAIL && process.env.FIREBASE_USER_PASSWORD) return makeFirebaseStore(pg);
@@ -165,41 +201,6 @@ function makeFirebaseStore(pg) {
   //   nexoraCentre/tournaments/<tid>/teams   {<teamId>: publicTeam}
   //   nexoraCentre/tournaments/<tid>/matches {<mid>: public match record}
   //   nexoraCentre/practice/<mid>            public match record
-  const tidOf = (config) => (config && typeof config.tid === 'string' && config.tid) || '';
-  const matchPath = (tid, id) => (tid ? 'tournaments/' + tid + '/matches/' + id : 'practice/' + id);
-  const matchParent = (tid) => (tid ? 'tournaments/' + tid + '/matches' : 'practice');
-  // The public match record carries ONLY the approved allowlist. Private fields
-  // (videoId/ninjaView camera links, tid, demo, registrationId, anything else present
-  // or future) never leave Postgres. Events are already field-whitelisted at ingestion.
-  const publicMatchConfig = (c) => ({
-    title: c.title, overs: c.overs,
-    teams: (c.teams || []).map((t) => ({ name: t.name, players: (t.players || []).map((p) => (typeof p === 'string' ? p : (p && p.name) || '')) })),
-    batFirst: c.batFirst, wideRun: c.wideRun, nbRun: c.nbRun, maxOversPerBowler: c.maxOversPerBowler,
-    date: c.date,
-  });
-  const PRIVATE_CONFIG_KEYS = ['videoId', 'ninjaView', 'tid', 'demo'];
-  // Serve-time merge: public state from the canonical Firebase record, private-only
-  // fields (camera links etc.) from the Postgres replica/legacy row.
-  const mergedConfig = (fbCfg, pgCfg) => {
-    const out = Object.assign({}, fbCfg);
-    for (const k of PRIVATE_CONFIG_KEYS) if (pgCfg && pgCfg[k] !== undefined) out[k] = pgCfg[k];
-    if (pgCfg && Array.isArray(pgCfg.teams) && Array.isArray(out.teams)) {
-      out.teams = out.teams.map((t, i) => {
-        const pt = pgCfg.teams[i];
-        return pt && pt.registrationId ? Object.assign({}, t, { registrationId: pt.registrationId }) : t;
-      });
-    }
-    return out;
-  };
-  const fbMatchRec = (config, events, rev, created, updated) => ({ config: publicMatchConfig(config), events, rev, created: created || iso(), updated: updated || iso() });
-  // Firebase records carry PUBLIC fields only - never employee IDs or departments,
-  // for ANY tournament including whxrz4tw. The PII merge join key is (team id, player
-  // name lowercase): safe because no player-rename route exists; any future roster-edit
-  // feature must thread empId through the mutation or this join breaks silently.
-  const publicTeam = (t) => ({
-    id: t.id, name: t.name, submittedAt: t.submittedAt,
-    players: (t.players || []).map((p) => ({ name: p.name, role: p.role || '' })),
-  });
   async function fbTournament(id) { const t = await fbd.get('tournaments/' + id + '/info'); return t && typeof t === 'object' ? t : null; }
   async function fbTournamentTeams(id) { const t = await fbd.get('tournaments/' + id + '/teams'); return t && typeof t === 'object' ? Object.values(t) : []; }
   // Match id -> tournament membership lives in Postgres (replica/legacy row config.tid);
@@ -444,7 +445,7 @@ function makeFirebaseStore(pg) {
       await pg.tcreate(t);
       await pg.manifestSet(t.id, 'tournament-degraded');
       try {
-        await fbd.put('tournaments/' + t.id, { name: t.name, listed: false, created: iso(), registration: false, teams: [] });
+        await fbd.put('tournaments/' + t.id + '/info', { name: t.name, listed: false, created: iso(), registration: false });
         await pg.manifestSet(t.id, 'tournament');
         return true;
       } catch (e) { console.error('Firebase tournament create degraded for ' + t.id + ' (reconcile lifts)', e); return false; }
@@ -457,8 +458,10 @@ function makeFirebaseStore(pg) {
     async tmutateTeams(id, fn) {
       for (let attempt = 0; attempt < 3; attempt++) {
         const kind0 = await pg.manifestGet(id);
-        const cur = kind0 === 'tournament-degraded' ? { data: null } : await fbd.get('tournaments/' + id, true);
-        if (!cur.data || typeof cur.data !== 'object') {
+        // Canonical existence is the info node; roster CAS targets the teams node only,
+        // so concurrent match writes under the same tournament never conflict with it.
+        const info = kind0 === 'tournament-degraded' ? null : await fbTournament(id);
+        if (!info) {
           if (kind0 === 'tournament') throw canonicalMissing('tournament', id);
           const legacy = await pg.tget(id);
           if (!legacy) return false;
@@ -467,17 +470,18 @@ function makeFirebaseStore(pg) {
           await pg.tsetTeams(id, teams);
           return true;
         }
+        const cur = await fbd.get('tournaments/' + id + '/teams', true);
         const merged = await tgetMerged(id);
         if (!merged) return false;
         const teams = fn(merged.teams || []);
         if (!teams) return true;
-        const approved = teams.filter((t) => t && t.status === 'approved').map((t) => publicTeam(t));
-        // Conditional PUT of the full re-read record: the real REST API honors If-Match
+        const approved = {};
+        for (const t of teams) if (t && t.status === 'approved') approved[t.id] = publicTeam(t);
+        // Conditional PUT of the re-read teams node: the real REST API honors If-Match
         // on PUT (a PATCH commit cannot prove the base ETag, so it would silently lose
-        // concurrent intents). cur.data carries only zero-PII public projections.
-        const next = Object.assign({}, cur.data, { teams: approved });
+        // concurrent intents). The node carries only zero-PII public projections.
         try {
-          await fbd.put('tournaments/' + id, next, cur.etag || undefined);
+          await fbd.put('tournaments/' + id + '/teams', approved, cur.etag || undefined);
         } catch (e) { if (e.status === 412) continue; throw e; }
         // Canonical commit done. Replica remainder (FULL roster incl. pending + PII) in Postgres.
         await pg.tsetTeams(id, teams); // failure -> 500; dedupe-on-read + reconcile converge
@@ -489,17 +493,17 @@ function makeFirebaseStore(pg) {
       // Registration key hash is a Postgres secret and leads; the Firebase flag is its projection.
       await pg.tsetReg(id, regKeyHash);
       const fb = await fbTournament(id);
-      if (fb) await fbd.patch('tournaments/' + id, { registration: !!regKeyHash });
+      if (fb) await fbd.patch('tournaments/' + id + '/info', { registration: !!regKeyHash });
     },
     async tsetListed(id, listed) {
       // Listed is public canonical in Firebase; the Postgres row is the replica.
       const fb = await fbTournament(id);
-      if (fb) await fbd.patch('tournaments/' + id, { listed: !!listed });
+      if (fb) await fbd.patch('tournaments/' + id + '/info', { listed: !!listed });
       return pg.tsetListed(id, listed);
     },
     async trename(id, name) {
       const fb = await fbTournament(id);
-      if (fb) { await fbd.patch('tournaments/' + id, { name }); await pg.trename(id, name); return true; }
+      if (fb) { await fbd.patch('tournaments/' + id + '/info', { name }); await pg.trename(id, name); return true; }
       return pg.trename(id, name);
     },
     async tcount() {
@@ -586,7 +590,7 @@ function makeFirebaseStore(pg) {
               const sortById = (a) => a.slice().sort((x, y) => String(x.id).localeCompare(String(y.id)));
               // Pending teams live in Postgres only by design (the merge re-adds them), so they are not divergence.
               const pgApproved = sortById(cleanStoredTeams(legacy.teams).filter((x) => x.status === 'approved').map(pub));
-              const fbApproved = sortById((Array.isArray(fb.teams) ? fb.teams : []).map(pub));
+              const fbApproved = sortById((await fbTournamentTeams(id)).map(pub));
               const diverged = legacy.name !== fb.name || !!legacy.listed !== !!fb.listed || !!legacy.regKeyHash !== !!fb.registration
                 || JSON.stringify(stableValue(pgApproved)) !== JSON.stringify(stableValue(fbApproved));
               if (diverged) { out.conflicts.push({ id, reason: 'degraded tournament: Postgres and Firebase copies diverge - held, no heal, window updates preserved; owner review needed' }); continue; }
@@ -597,26 +601,34 @@ function makeFirebaseStore(pg) {
             if (!legacy) { out.conflicts.push({ id, reason: 'degraded tournament missing from Postgres' }); continue; }
             const approved = cleanStoredTeams(legacy.teams).filter((x) => x.status === 'approved').map((t) => publicTeam(t));
             out.lifted.push({ tournament: id });
-            if (!dry) { await fbd.put('tournaments/' + id, { name: legacy.name, listed: !!legacy.listed, created: legacy.created || iso(), registration: !!legacy.regKeyHash, teams: approved }); await pg.manifestSet(id, 'tournament'); }
+            if (!dry) {
+              const teamMap = {};
+              for (const t of approved) teamMap[t.id] = t;
+              // teams node first: an info-only partial lift still reads as absent (fbTournament
+              // returns null) so the next reconcile retries cleanly; manifest heals last.
+              await fbd.put('tournaments/' + id + '/teams', teamMap);
+              await fbd.put('tournaments/' + id + '/info', { name: legacy.name, listed: !!legacy.listed, created: legacy.created || iso(), registration: !!legacy.regKeyHash });
+              await pg.manifestSet(id, 'tournament');
+            }
           }
           if (man[id] === 'match-degraded') {
-            const fb = await fbd.get('matches/' + id);
+            const legacy = await pg.get(id);
+            if (!legacy) { out.conflicts.push({ id, reason: 'degraded match missing from Postgres' }); continue; }
+            const mpath = matchPath(tidOf(legacy.config), id);
+            const fb = await fbd.get(mpath);
             if (fb && typeof fb === 'object' && fb.config) {
               // Same committed-but-response-lost guard as tournaments: heal only when the
               // Postgres copy (canonical during the window) and Firebase agree, so window
-              // scoring is never silently overwritten by the converge step.
-              const legacy = await pg.get(id);
-              if (!legacy) { out.conflicts.push({ id, reason: 'degraded match missing from Postgres' }); continue; }
-              const sameConfig = JSON.stringify(stableValue(legacy.config)) === JSON.stringify(stableValue(fb.config));
+              // scoring is never silently overwritten by the converge step. Firebase holds
+              // only the public projection, so compare projections, not the full config.
+              const sameConfig = JSON.stringify(stableValue(publicMatchConfig(legacy.config))) === JSON.stringify(stableValue(fb.config));
               const sameEvents = JSON.stringify(stableValue(legacy.events || [])) === JSON.stringify(stableValue(Array.isArray(fb.events) ? fb.events : []));
               if (!sameConfig || !sameEvents) { out.conflicts.push({ id, reason: 'degraded match: Postgres and Firebase copies diverge - held, no heal, window scoring preserved; owner review needed' }); continue; }
               if (!dry) await pg.manifestSet(id, 'match');
               continue;
             }
-            const legacy = await pg.get(id);
-            if (!legacy) { out.conflicts.push({ id, reason: 'degraded match missing from Postgres' }); continue; }
             out.lifted.push({ match: id });
-            if (!dry) { await fbd.put('matches/' + id, fbMatchRec(legacy.config, legacy.events || [], legacy.rev || 0, legacy.created, legacy.updated)); await pg.manifestSet(id, 'match'); }
+            if (!dry) { await fbd.put(mpath, fbMatchRec(legacy.config, legacy.events || [], legacy.rev || 0, legacy.created, legacy.updated)); await pg.manifestSet(id, 'match'); }
           }
         } catch (e) { out.errors.push({ id, error: String((e && e.message) || e).slice(0, 200) }); }
       }
@@ -647,22 +659,23 @@ function makeFirebaseStore(pg) {
           const fb = await fbTournament(id);
           if (fb && !!fb.registration !== !!merged.regKeyHash) {
             out.syncedFlags.push({ tournament: id, registration: !!merged.regKeyHash });
-            if (!dry) await fbd.patch('tournaments/' + id, { registration: !!merged.regKeyHash });
+            if (!dry) await fbd.patch('tournaments/' + id + '/info', { registration: !!merged.regKeyHash });
           }
         } catch (e) { out.errors.push({ tournament: id, error: String((e && e.message) || e).slice(0, 200) }); }
       }
       // 3. Canonical matches: insert missing replicas, set diverged replicas to canonical.
-      const mshallow = await fbd.getShallow('matches');
-      const fbMids = mshallow && typeof mshallow === 'object' ? Object.keys(mshallow) : [];
+      // Nested layout: ids come from the practice + per-tournament nodes; the Postgres
+      // replica row resolves each id to its nested path (membership lives in Postgres).
+      const fbMids = await fbMatchIds();
       for (const id of fbMids) {
         try {
           const kindH = await pg.manifestGet(id);
           if (kindH === 'match-degraded') continue; // still Postgres-canonical (held divergent or awaiting lift): never converge over it
           if (kindH !== 'match') { out.syncedFlags.push({ match: id, manifestHealed: true }); if (!dry) await pg.manifestSet(id, 'match'); }
-          const fb = await fbd.get('matches/' + id);
+          const legacy = await pg.get(id);
+          const fb = await fbd.get(matchPath(tidOf(legacy && legacy.config), id));
           if (!fb || typeof fb !== 'object' || !fb.config) continue;
           const fbEvents = Array.isArray(fb.events) ? fb.events : [];
-          const legacy = await pg.get(id);
           if (!legacy) {
             const keyHash = await pg.matchKeyGet(id);
             if (!keyHash) { out.conflicts.push({ match: id, reason: 'no manager key in Postgres - not exported' }); continue; }
@@ -671,13 +684,15 @@ function makeFirebaseStore(pg) {
             continue;
           }
           // jsonb round-trips reorder object keys; compare normalized values, not raw strings.
+          // Firebase holds only the public projection: compare projections, and repair the
+          // replica with canonical public fields merged over its preserved private fields.
           const sameEvents = JSON.stringify(stableValue(legacy.events || [])) === JSON.stringify(stableValue(fbEvents));
-          const sameConfig = JSON.stringify(stableValue(legacy.config)) === JSON.stringify(stableValue(fb.config));
+          const sameConfig = JSON.stringify(stableValue(publicMatchConfig(legacy.config))) === JSON.stringify(stableValue(fb.config));
           if (!sameEvents || !sameConfig || (legacy.rev || 0) !== (fb.rev || 0)) {
             out.repairedMatches.push({ match: id, events: !sameEvents, config: !sameConfig, rev: (legacy.rev || 0) !== (fb.rev || 0) });
             if (!dry) {
               await pg.snapshotSave('match:' + id, legacy);
-              const okUp = await pg.exportMatchUpdate(id, fb.config, fbEvents, fb.rev || 0, fb.updated || iso(), legacy.rev || 0);
+              const okUp = await pg.exportMatchUpdate(id, mergedConfig(fb.config, legacy.config), fbEvents, fb.rev || 0, fb.updated || iso(), legacy.rev || 0);
               if (!okUp) out.conflicts.push({ match: id, reason: 'replica changed concurrently - rerun reconcile' });
             }
           }
@@ -692,7 +707,10 @@ function makeFirebaseStore(pg) {
       const existing = await fbTournament(t.id);
       if (!existing) {
         const approved = cleanStoredTeams(t.teams).filter((x) => x.status === 'approved').map((x) => publicTeam(x));
-        await fbd.put('tournaments/' + t.id, { name: t.name, listed: !!t.listed, created: t.created || iso(), registration: !!t.regKeyHash, teams: approved });
+        const teamMap = {};
+        for (const tm of approved) teamMap[tm.id] = tm;
+        await fbd.put('tournaments/' + t.id + '/teams', teamMap);
+        await fbd.put('tournaments/' + t.id + '/info', { name: t.name, listed: !!t.listed, created: t.created || iso(), registration: !!t.regKeyHash });
       }
       await pg.manifestSet(t.id, 'tournament');
       return localAdded || !existing;
@@ -1074,21 +1092,26 @@ async function handle(req, res) {
           const t = await store.tget(tid);
           if (!t) { out.skipped.push({ tournament: tid, reason: 'missing' }); continue; }
           if (!t.listed && !includeUnlisted) { out.skipped.push({ tournament: tid, reason: 'unlisted - owner audience approval required' }); continue; }
-          const existing = await fbd.get('tournaments/' + tid);
+          const existing = await fbd.get('tournaments/' + tid + '/info');
           if (existing) { out.skipped.push({ tournament: tid, reason: 'already in Firebase' }); }
           else {
             const approved = cleanStoredTeams(t.teams).filter((x) => x.status === 'approved');
-            const rec = { name: t.name, listed: !!t.listed, created: t.created || new Date().toISOString(), registration: !!t.regKeyHash,
-              teams: approved.map((tm) => ({ id: tm.id, name: tm.name, submittedAt: tm.submittedAt,
-                players: tm.players.map((p) => ({ name: p.name, role: p.role || '' })) })) };
+            const teamMap = {};
+            for (const tm of approved) teamMap[tm.id] = { id: tm.id, name: tm.name, submittedAt: tm.submittedAt,
+              players: tm.players.map((p) => ({ name: p.name, role: p.role || '' })) };
             out.tournaments.push({ id: tid, name: t.name, approvedTeams: approved.length });
-            if (!dry) { await fbd.put('tournaments/' + tid, rec); await store.manifestSet(tid, 'tournament'); }
+            if (!dry) {
+              await fbd.put('tournaments/' + tid + '/teams', teamMap);
+              await fbd.put('tournaments/' + tid + '/info', { name: t.name, listed: !!t.listed, created: t.created || new Date().toISOString(), registration: !!t.regKeyHash });
+              await store.manifestSet(tid, 'tournament');
+            }
           }
           for (const m of await store.byTournament(tid)) {
-            const have = await fbd.get('matches/' + m.id);
+            const mpath = 'tournaments/' + tid + '/matches/' + m.id;
+            const have = await fbd.get(mpath);
             if (have) { out.skipped.push({ match: m.id, reason: 'already in Firebase' }); continue; }
             out.matches.push({ id: m.id, tournament: tid, events: (m.events || []).length });
-            if (!dry) { await fbd.put('matches/' + m.id, { config: m.config, events: m.events || [], rev: m.rev || 0, created: m.created || m.updated || new Date().toISOString(), updated: m.updated || new Date().toISOString() }); await store.manifestSet(m.id, 'match'); }
+            if (!dry) { await fbd.put(mpath, fbMatchRec(m.config, m.events || [], m.rev || 0, m.created || m.updated, m.updated)); await store.manifestSet(m.id, 'match'); }
           }
         } catch (e) { out.errors.push({ tournament: tid, error: String((e && e.message) || e).slice(0, 200) }); }
       }
