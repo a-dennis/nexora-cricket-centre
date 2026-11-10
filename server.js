@@ -69,7 +69,6 @@ function makePgStore() {
       async tget(id) { await tready; const r = await pool.query('SELECT * FROM cricket_tournaments WHERE id=$1', [id]); const x = r.rows[0]; return x && { id: x.id, name: x.name, keyHash: x.key_hash, teams: Array.isArray(x.teams) ? x.teams : [], regKeyHash: x.reg_key_hash || null, listed: !!x.listed }; },
       async tsetTeams(id, teams) { await tready; await pool.query('UPDATE cricket_tournaments SET teams=$2 WHERE id=$1', [id, JSON.stringify(teams)]); },
       async tmutateTeams(id, fn) { await tready; const t = await this.tget(id); if (!t) return false; const teams = fn(t.teams || []); if (!teams) return true; await pool.query('UPDATE cricket_tournaments SET teams=$2 WHERE id=$1', [id, JSON.stringify(teams)]); return true; },
-      async manifestSet(id, kind) { return false; },
       async reconcileFromFirebase(dry) { return { dryRun: !!dry, note: 'postgres mode: nothing to reconcile', lifted: [], insertedMatches: [], repairedMatches: [], repairedTournaments: [], syncedFlags: [], conflicts: [], errors: [] }; },
       async tsetReg(id, regKeyHash) { await tready; await pool.query('UPDATE cricket_tournaments SET reg_key_hash=$2 WHERE id=$1', [id, regKeyHash]); },
       async getSetting(k) { await sready; const r = await pool.query('SELECT v FROM cricket_settings WHERE k=$1', [k]); return r.rows[0] ? r.rows[0].v : null; },
@@ -364,8 +363,12 @@ function makeFirebaseStore(pg) {
         const teams = fn(merged.teams || []);
         if (!teams) return true;
         const approved = teams.filter((t) => t && t.status === 'approved').map((t) => publicTeam(t));
+        // Conditional PUT of the full re-read record: the real REST API honors If-Match
+        // on PUT (a PATCH commit cannot prove the base ETag, so it would silently lose
+        // concurrent intents). cur.data carries only zero-PII public projections.
+        const next = Object.assign({}, cur.data, { teams: approved });
         try {
-          await fbd.patch('tournaments/' + id, { teams: approved }, cur.etag || undefined);
+          await fbd.put('tournaments/' + id, next, cur.etag || undefined);
         } catch (e) { if (e.status === 412) continue; throw e; }
         // Canonical commit done. Replica remainder (FULL roster incl. pending + PII) in Postgres.
         await pg.tsetTeams(id, teams); // failure -> 500; dedupe-on-read + reconcile converge
@@ -391,8 +394,13 @@ function makeFirebaseStore(pg) {
       return pg.trename(id, name);
     },
     async tcount() {
-      const all = await fbd.getShallow('tournaments');
-      const fbIds = all && typeof all === 'object' ? Object.keys(all) : [];
+      // Storage-limit guard only (not user-facing canonical data): if Firebase is
+      // unreachable, fall back to the Postgres count so a degraded create can proceed.
+      let fbIds = [];
+      try {
+        const all = await fbd.getShallow('tournaments');
+        fbIds = all && typeof all === 'object' ? Object.keys(all) : [];
+      } catch (e) { return (await pg.allTournaments()).length; }
       const legacy = await pg.allTournaments();
       return fbIds.length + legacy.filter((t) => !fbIds.includes(t.id)).length;
     },
@@ -486,7 +494,8 @@ function makeFirebaseStore(pg) {
             if (!dry) await pg.importMatch({ id, config: fb.config, events: fbEvents, keyHash, rev: fb.rev || 0, created: fb.created, updated: fb.updated });
             continue;
           }
-          const sameEvents = JSON.stringify(legacy.events || []) === JSON.stringify(fbEvents);
+          // jsonb round-trips reorder object keys; compare normalized values, not raw strings.
+          const sameEvents = JSON.stringify(stableValue(legacy.events || [])) === JSON.stringify(stableValue(fbEvents));
           const sameConfig = JSON.stringify(stableValue(legacy.config)) === JSON.stringify(stableValue(fb.config));
           if (!sameEvents || !sameConfig || (legacy.rev || 0) !== (fb.rev || 0)) {
             out.repairedMatches.push({ match: id, events: !sameEvents, config: !sameConfig, rev: (legacy.rev || 0) !== (fb.rev || 0) });
