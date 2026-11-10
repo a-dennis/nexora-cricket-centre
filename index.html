@@ -331,16 +331,15 @@ var app=document.getElementById('app');
 var path=location.pathname;
 var mm=path.match(/^\/(m|s|t|r)\/([a-z0-9]+)/);
 var mode=mm?mm[1]:(path.replace(/\/+$/,'')==='/launch'?'launch':'home'), id=mm?mm[2]:null;
-var orgScoring=false;
-function scoringHeaders(){var own=tList().filter(function(t){return t.id==='whxrz4tw'})[0];return orgScoring&&own?{'x-org-key':own.key,'x-org-session':orgSess()}:{};}
-function hasScoring(){return !!key||orgScoring;}
-var S=null, T=null, ym=null, selDay=null, key=null, tab='live', busy=false, extra='', sheet=null, lastOk=0, err=null, polling=null, info={storage:'?'};
+function hasScoring(){return !!(S&&S.canScore);}
+var S=null, T=null, ym=null, selDay=null, key=null, tab='live', busy=false, extra='', sheet=null, lastOk=0, err=null, polling=null, info={storage:'?'}, claimStatus=null, claimBusy=false, fbSub=false;
 function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
 function ini(n){var w=String(n).trim().split(/\s+/);return (w.length>1?w[0][0]+w[1][0]:String(n).slice(0,2)).toUpperCase()}
 function toast(m,ok){var t=document.createElement('div');t.className='toast'+(ok?' ok':'');t.textContent=m;document.body.appendChild(t);setTimeout(function(){t.remove()},2600)}
 var FOOT='<div class="foot">Developed by <b>Anthony Dennis</b></div>';
 function api(method,url,body,orgKey,hdrs){
-  return fetch(url,{method:method,headers:Object.assign({'content-type':'application/json'},key?{'x-scorer-key':key}:{},scoringHeaders(),orgKey?{'x-org-key':orgKey}:{},orgSess()?{'x-org-session':orgSess()}:{},hdrs||{}),body:body?JSON.stringify(body):undefined}).then(function(r){return r.json().then(function(j){return {ok:r.ok,status:r.status,j:j}})});
+  var devTok=null;try{devTok=id?localStorage.getItem('sdev_'+id):null}catch(e){}
+  return fetch(url,{method:method,headers:Object.assign({'content-type':'application/json'},key?{'x-scorer-key':key}:{},devTok?{'x-scorer-device':devTok}:{},orgKey?{'x-org-key':orgKey}:{},orgSess()?{'x-org-session':orgSess()}:{},hdrs||{}),body:body?JSON.stringify(body):undefined}).then(function(r){return r.json().then(function(j){return {ok:r.ok,status:r.status,j:j}})});
 }
 function chipCls(t){if(/^\d*W$/.test(t))return'bw';if(t==='4')return'b4';if(t==='6')return'b6';if(/Wd|Nb|B$|Lb$/.test(t))return'bx';if(t==='0')return'b0';return''}
 function chips(arr,pad){var h='';arr.forEach(function(t){h+='<div class="ball '+chipCls(t)+'">'+esc(t==='0'?'·':t)+'</div>'});for(var i=arr.length;i<(pad||0);i++)h+='<div class="ball bn">·</div>';return h}
@@ -633,7 +632,7 @@ function downloadImage(){
   },'image/png');
 }
 
-document.addEventListener('click',function(e){if(e.target&&e.target.id==='dlrep')downloadReport();if(e.target&&e.target.id==='dlimg')downloadImage();if(e.target&&e.target.id==='dlbk')dlBackup('/api/matches/'+id+'/backup',Object.assign({'x-scorer-key':key||''},scoringHeaders()),'match-backup-'+id);if(e.target&&e.target.id==='dltb'){var o=tList().filter(function(t){return t.id===id})[0];if(o)dlBackup('/api/tournaments/'+id+'/backup',{'x-org-key':o.key},'tournament-backup-'+id)}});
+document.addEventListener('click',function(e){if(e.target&&e.target.id==='dlrep')downloadReport();if(e.target&&e.target.id==='dlimg')downloadImage();if(e.target&&e.target.id==='dlbk')dlBackup('/api/matches/'+id+'/backup',Object.assign({'x-scorer-key':key||''},(function(){var d=null;try{d=localStorage.getItem('sdev_'+id)}catch(e){};return d?{'x-scorer-device':d}:{}})(),orgSess()?{'x-org-session':orgSess()}:{}),'match-backup-'+id);if(e.target&&e.target.id==='dltb'){var o=tList().filter(function(t){return t.id===id})[0];if(o)dlBackup('/api/tournaments/'+id+'/backup',{'x-org-key':o.key},'tournament-backup-'+id)}});
 function dlBackup(url,hd,nm){
   fetch(url,{headers:hd}).then(function(r){return r.json().then(function(j){if(!r.ok){toast(j.error||'Could not download');return}
     var b=new Blob([JSON.stringify(j,null,1)],{type:'application/json'}),a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=nm+'-'+todayStr()+'.json';document.body.appendChild(a);a.click();setTimeout(function(){URL.revokeObjectURL(a.href);a.remove()},1500);toast('Backup downloaded',1)})},function(){toast('Network problem. Try again.')});
@@ -779,7 +778,7 @@ function renderOrgArea(area){
     h+=lkRow('Live scores & calendar','/t/'+t.id,{share:true});
     if(t.own&&t.regKey)h+=lkRow('Captain team entry','/r/'+t.id+'#r='+t.regKey,{share:true});
     if(t.own)h+=lkRow('Organiser controls (keep private)','/t/'+t.id+'#o='+t.key,{noOpen:true});
-    if(t.own&&t.id==='whxrz4tw')h+='<a class="btn sec" style="margin-top:10px;text-decoration:none" href="/s/49asxecn">Open Ceremonial Match scorer</a>';
+
   });
   h+='<div class="lkgrp">Everyone</div>'+lkRow('Grand opening ceremony','/launch',{share:true});
   h+='</div>';
@@ -899,7 +898,7 @@ function homeLinksCard(){
     h+=lkRow('Live scores & calendar','/t/'+t.id,{share:true});
     if(t.own&&t.regKey)h+=lkRow('Captain team entry','/r/'+t.id+'#r='+t.regKey,{share:true});
     if(t.own)h+=lkRow('Organiser controls (keep private)','/t/'+t.id+'#o='+t.key,{noOpen:true});
-    if(t.own&&t.id==='whxrz4tw')h+='<a class="btn sec" style="margin-top:10px;text-decoration:none" href="/s/49asxecn">Open Ceremonial Match scorer</a>';
+
   });
   h+='<div class="lkgrp">Everyone</div>'+lkRow('Grand opening ceremony','/launch',{share:true});
   h+='</div></div>';
@@ -1043,7 +1042,7 @@ function renderT(){
     if(T.registration==='open'&&ownL.regKey)h+=lkRow('Captain team entry','/r/'+id+'#r='+ownL.regKey,{share:true});
     else if(T.registration==='open')h+='<div class="mut" style="margin-top:8px;font-size:12.5px">Captain registration is open, but its link is saved on the device that created it. You can make a new one under Team registrations below.</div>';
     else h+='<div class="mut" style="margin-top:8px;font-size:12.5px">Captain registration link not created yet - make one under Team registrations below.</div>';
-    if(id==='whxrz4tw'&&(T.matches||[]).some(function(m){return m.id==='49asxecn'}))h+='<a class="btn sec" style="margin-top:10px;text-decoration:none" href="/s/49asxecn">Open Ceremonial Match scorer</a><div class="mut" style="font-size:12px;margin-top:6px">Requires Organiser sign-in on this organiser device.</div>';
+
     var sks=(T.matches||[]).map(function(m){var k=null;try{k=localStorage.getItem('ck_'+m.id)}catch(e){}return k?{id:m.id,title:m.title,key:k}:null}).filter(Boolean);
     if(sks.length)h+=sks.map(function(s){return lkRow('Scorer link - '+s.title,'/m/'+s.id+'#k='+s.key)}).join('');
     else h+='<div class="mut" style="margin-top:8px;font-size:12.5px">Scorer links are saved on the device that created each match - a new match shows its scorer link once, at creation.</div>';
@@ -1140,7 +1139,10 @@ function load(first){
   fetch('/api/matches/'+id+(S&&!first?'?rev='+S.rev:'')).then(function(r){return r.json().then(function(j){return{ok:r.ok,j:j}})}).then(function(r){
     if(!r.ok){err=r.j.error||'Error';if(!S)render();return}
     err=null;lastOk=Date.now();
-    if(!r.j.unchanged){if(!r.j.teamRefs&&S&&S.teamRefs)r.j.teamRefs=S.teamRefs;S=r.j;if(!sheetOpenLock())render()}else if(mode==='m'||mode==='s')tickLabel();
+    if(!r.j.unchanged){if(!r.j.teamRefs&&S&&S.teamRefs)r.j.teamRefs=S.teamRefs;S=r.j;if(S&&S.canScore===undefined)S.canScore=false;if(!sheetOpenLock())render()}else if(mode==='m'||mode==='s')tickLabel();
+    if(mode==='s'&&S&&!fbSub){fbSub=true;fbLive(S.config&&S.config.tid?('tournaments/'+S.config.tid+'/matches/'+id):('practice/'+id),function(){load()})}
+    if(mode==='s'&&key&&S&&!S.canScore){var dt=null;try{dt=localStorage.getItem('sdev_'+id)}catch(e){}
+      fetch('/api/matches/'+id+'/scorer-claim',{headers:Object.assign({'x-scorer-key':key},dt?{'x-scorer-device':dt}:{})}).then(function(r){return r.json()}).then(function(j){var st=j&&j.status||'none';if(st!==claimStatus){claimStatus=st;if(st==='approved'){load(true);return}render()}}).catch(function(){})}
   }).catch(function(){err='Offline, retrying...';tickLabel()});
 }
 function sheetOpenLock(){return sheet&&sheet.lock&&mode==='s'&&false}
@@ -1343,7 +1345,11 @@ document.addEventListener('click',function(e){
 });
 
 function scorerPanel(){
-  if(!hasScoring())return '<div class="warn" style="margin-top:14px">This is a view-only link. Open the scorer link you were given to enter scores.</div>';
+  if(!hasScoring()){
+    if(key&&claimStatus==='pending')return '<div class="card" style="margin-top:14px"><b>Waiting for approval</b><div class="mut" style="margin-top:8px">The organiser approves this device from their console. This page updates by itself - keep it open.</div></div>';
+    if(key)return '<div class="card" style="margin-top:14px"><b>Score on this device?</b><div class="mut" style="margin-top:8px">For match security the organiser approves each scoring device. Enter a short label (for example, your name) and request approval.</div><input id="claimlabel" maxlength="40" placeholder="Device label (e.g. Ravi phone)" style="margin-top:10px"><button class="btn pri" id="claimbtn" style="margin-top:10px">Request scoring approval</button></div>';
+    return '<div class="warn" style="margin-top:14px">This is a view-only link. Open the scorer link you were given to enter scores.</div>';
+  }
   var st=S.state,i=cur();
   if(st.result)return '<div class="card"><div class="mut">Match finished. Use Undo if the last ball was a mistake.</div><div class="grid" style="grid-template-columns:1fr 1fr"><button class="btn small" id="undo">↶ Undo</button><button class="btn small" id="newm">New match</button></div></div>';
   var dis=busy||st.needs.length?' disabled':'';
@@ -1525,6 +1531,17 @@ scorerPanel=function(){
 };
   
 document.addEventListener('click',function(e){if(e.target&&e.target.closest&&e.target.closest('#extrasplus')&&mode==='s')openExtrasPlus()});
+document.addEventListener('click',function(e){
+  if(!(e.target&&e.target.id==='claimbtn')||claimBusy)return;
+  var lb=document.getElementById('claimlabel');var label=lb?lb.value:'';
+  claimBusy=true;
+  fetch('/api/matches/'+id+'/scorer-claim',{method:'POST',headers:{'content-type':'application/json','x-scorer-key':key},body:JSON.stringify({label:label})}).then(function(r){return r.json().then(function(j){return {ok:r.ok,j:j}})}).then(function(r){
+    claimBusy=false;
+    if(r.ok&&r.j.device){try{localStorage.setItem('sdev_'+id,r.j.device)}catch(e){};claimStatus='pending';toast('Approval requested. Waiting for the organiser.',true)}
+    else toast(r.j&&r.j.error||'Could not request approval');
+    render();
+  }).catch(function(){claimBusy=false;toast('No connection. Not saved - try again.');render()});
+});
   
 function openExtrasPlus(){
   
@@ -1576,9 +1593,8 @@ function openExtrasPlus(){
   
 }
   
-var ceremonyViewerBase=viewPane;
   
-viewPane=function(){return '<a class="btn pri" href="/m/49asxecn" id="ceremonymatch" style="display:block;text-align:center;text-decoration:none;margin-bottom:14px">Today\'s ceremonial match</a><div class="mut" style="margin-bottom:16px">Malnad Divas v Sahyadri ICONS · 7 Nov 2026</div>'+ceremonyViewerBase()};/* Live updates: when the online copy in Firebase changes, refresh this page's data. Invisible; if the SDK or network fails, the existing timers stay the fallback. */
+/* Live updates: when the online copy in Firebase changes, refresh this page's data. Invisible; if the SDK or network fails, the existing timers stay the fallback. */
 var fbApp=null,fbReady=null;
 function fbLive(path,onChange){
   try{
@@ -1610,8 +1626,7 @@ else{
     try{if(m){localStorage.setItem('ck_'+id,m[1]);history.replaceState(null,'',location.pathname)}key=localStorage.getItem('ck_'+id)}catch(e){key=m?m[1]:null}
   }
   render();load(true);
-  fbLive('matches/'+id,function(){load()});
-  if(mode==='s'&&id==='49asxecn'&&!key){var so=tList().filter(function(t){return t.id==='whxrz4tw'})[0];if(so&&orgSess())fetch('/api/matches/'+id+'/scoring-access',{headers:{'x-org-key':so.key,'x-org-session':orgSess()}}).then(function(r){return r.json().then(function(j){return r.ok&&j.ok})}).then(function(ok){if(ok){orgScoring=true;render()}}).catch(function(){});}
+
   setInterval(load,3000);setInterval(tickLabel,1000);
   document.addEventListener('visibilitychange',function(){if(!document.hidden)load()});
 }

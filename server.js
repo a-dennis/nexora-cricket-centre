@@ -1552,7 +1552,7 @@ async function handle(req, res) {
     const m = await store.get(mt[1]);
     if (!m) return send(res, 404, { error: 'Match not found' });
     if (url.searchParams.get('rev') === String(m.rev)) return send(res, 200, { unchanged: true, rev: m.rev });
-    const view = publicView(m); view.teamRefs = registeredTeamRefs(m, m.config.tid ? await store.tget(m.config.tid) : null); return send(res, 200, view);
+    const view = publicView(m); view.teamRefs = registeredTeamRefs(m, m.config.tid ? await store.tget(m.config.tid) : null); view.canScore = await canScore(req, m); return send(res, 200, view);
   }
   if ((mt = p.match(/^\/api\/matches\/([a-z0-9]{6,12})\/(event|undo)$/)) && req.method === 'POST') {
     const m = await store.get(mt[1]);
