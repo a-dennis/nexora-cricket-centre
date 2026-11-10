@@ -1304,7 +1304,8 @@ async function handle(req, res) {
       let g = null; try { g = JSON.parse(r.v); } catch (e) { continue; }
       if (!g || !g.matchId) continue;
       const expired = g.exp && Date.parse(g.exp) < Date.now();
-      out.push({ matchId: g.matchId, claim: r.k.slice(-8), status: expired ? 'expired' : g.status, label: g.label || '', created: g.created, exp: g.exp });
+      const dm = await store.get(g.matchId);
+      out.push({ matchId: g.matchId, title: (dm && dm.config && dm.config.title) || '', claim: r.k.slice(-8), status: expired ? 'expired' : g.status, label: g.label || '', created: g.created, exp: g.exp });
     }
     out.sort((a, b) => String(a.created).localeCompare(String(b.created)));
     return send(res, 200, { devices: out });

@@ -784,11 +784,38 @@ function renderOrgArea(area){
   h+='</div>';
   h+='<h1>Camera operator</h1><div class="card"><b>Camera-only helper</b><div class="mut" style="margin-top:8px">Share this page with the camera phone. It has no scoring access. They start their own camera and send you only its viewing link to publish.</div><a class="btn sec" style="margin-top:12px;text-decoration:none" href="/camera" target="_blank" rel="noopener">Open camera helper</a></div>';
   h+=ninjaPreviewCard();
+  h+='<h1>Scoring devices</h1><div class="card"><b>Ground scoring devices</b><div class="mut" style="margin-top:8px">A scorer opens their match scorer link on the ground and requests approval from this console. Approve only the device you expect; revoking ends its access straight away.</div><div id="ogdev" style="margin-top:10px"><span class="mut">Loading&hellip;</span></div></div>';
   h+='<h1>Organiser links</h1><div class="card"><b>Replace an organiser link</b><div class="mut" style="margin-top:8px">Creates a fresh private organiser link. The old link for that tournament stops working straight away. The new link shows only on this screen - share it privately, never in a group.</div><div id="ogl"></div></div>';
   h+=matchForm()+tourInner();
   area.innerHTML=h;
-  wireMatch();wireTour();wirePick();refreshNames();wireNinjaPreview();wireOrgLinks(area,items);
+  wireMatch();wireTour();wirePick();refreshNames();wireNinjaPreview();wireOrgLinks(area,items);loadOrgDevices();
   document.getElementById('ogout').onclick=function(){var tok=orgSess();orgSetSess('');onlineOrgTours=[];if(tok)api('POST','/api/auth/logout',{token:tok}).catch(function(){});renderOrg()};
+}
+function loadOrgDevices(){
+  var box=document.getElementById('ogdev');if(!box)return;
+  api('GET','/api/scorer-devices').then(function(r){
+    if(!r.ok){box.innerHTML='<span class="mut">'+esc(r.j&&r.j.error||'Could not load devices')+'</span>';return}
+    var ds=(r.j.devices||[]).filter(function(d){return d.status!=='revoked'});
+    if(!ds.length){box.innerHTML='<span class="mut">No devices have requested scoring access.</span>';return}
+    var h='';
+    ds.forEach(function(d){
+      h+='<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 0;border-top:1px solid #e5e0d8">'
+        +'<div><b>'+esc(d.label||'Unnamed device')+'</b><div class="mut" style="font-size:12.5px">'+esc(d.title||d.matchId)+' · '+(d.status==='pending'?'waiting for approval':d.status)+(d.exp?' · till '+String(d.exp).slice(0,10):'')+'</div></div>'
+        +(d.status==='pending'?'<button class="btn pri small" data-dev-a="approve" data-dev-m="'+esc(d.matchId)+'" data-dev-c="'+esc(d.claim)+'">Approve</button>':'')
+        +(d.status==='approved'?'<button class="btn sec small" data-dev-a="revoke" data-dev-m="'+esc(d.matchId)+'" data-dev-c="'+esc(d.claim)+'">Revoke</button>':'')
+        +'</div>';
+    });
+    box.innerHTML=h;
+    Array.prototype.forEach.call(box.querySelectorAll('[data-dev-a]'),function(b){
+      b.onclick=function(){
+        b.disabled=true;
+        api('POST','/api/scorer-devices',{matchId:b.getAttribute('data-dev-m'),claim:b.getAttribute('data-dev-c'),action:b.getAttribute('data-dev-a')}).then(function(r){
+          toast(r.ok?(b.getAttribute('data-dev-a')==='approve'?'Device approved':'Device revoked'):(r.j&&r.j.error||'Failed'),!!r.ok);
+          loadOrgDevices();
+        }).catch(function(){toast('No connection. Try again.');loadOrgDevices()});
+      };
+    });
+  }).catch(function(){box.innerHTML='<span class="mut">No connection.</span>'});
 }
 /* Private camera preview: current page only; never saved to match data or browser storage. */
 function ninjaPreviewCard(){
@@ -1136,7 +1163,7 @@ function showCreated(j){
 /* ---------- MATCH ---------- */
 function load(first){
   if(document.hidden&&!first)return;
-  fetch('/api/matches/'+id+(S&&!first?'?rev='+S.rev:'')).then(function(r){return r.json().then(function(j){return{ok:r.ok,j:j}})}).then(function(r){
+  api('GET','/api/matches/'+id+(S&&!first?'?rev='+S.rev:'')).then(function(r){
     if(!r.ok){err=r.j.error||'Error';if(!S)render();return}
     err=null;lastOk=Date.now();
     if(!r.j.unchanged){if(!r.j.teamRefs&&S&&S.teamRefs)r.j.teamRefs=S.teamRefs;S=r.j;if(S&&S.canScore===undefined)S.canScore=false;if(!sheetOpenLock())render()}else if(mode==='m'||mode==='s')tickLabel();
