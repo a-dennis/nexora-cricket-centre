@@ -821,13 +821,35 @@ function publicNameProblem(s) {
 }
 const PUBLIC_NAME_MSG = 'Visible to everyone. Do not enter phone numbers or private details.';
 
-// Recovery is limited to the fresh replacement ceremony. It never reveals or rotates its scorer key.
-async function canScore(req,m) {
-  if (keyEq(req.headers['x-scorer-key'],m.keyHash)) return true;
-  if(m.id!=='49asxecn'||!m.config||m.config.tid!=='whxrz4tw') return false;
-  if(!(await validOrgSession(req.headers['x-org-session'])))return false;
-  const t=await store.tget(m.config.tid);
-  return !!(t&&keyEq(req.headers['x-org-key'],t.keyHash));
+// Scoring access, two ways in and no others:
+// 1. A ground device the organiser approved for THIS match (scorer link key + its
+//    approved device grant). The raw scorer link alone writes nothing - no events,
+//    no undo, no video, no backup. Grants are match-scoped and expire.
+// 2. The organiser's own signed-in session, scoped to proven ownership: a
+//    tournament match needs the carried orgtour fingerprint, a practice match is
+//    the organiser's own. No special-case bypass for any match.
+async function organiserOwnsMatch(req, m) {
+  if (!(await validOrgSession(req.headers['x-org-session']))) return false;
+  const tid = m.config && m.config.tid;
+  if (!tid) return true;
+  const t = await store.tget(tid);
+  return !!(t && (await store.getSetting('orgtour_' + tid)) === t.keyHash);
+}
+const SCORER_DEVICE_TTL_MS = 30 * 24 * 3600e3;
+function scorerDevKey(matchId, token) { return 'scorerdev_' + matchId + '_' + sha(token); }
+async function scorerDeviceGrant(matchId, token) {
+  if (!/^[A-Za-z0-9]{16,80}$/.test(String(token || ''))) return null;
+  let g = null; try { g = JSON.parse((await store.getSetting(scorerDevKey(matchId, token))) || 'null'); } catch (e) { g = null; }
+  if (!g || g.matchId !== matchId) return null;
+  if (g.exp && Date.parse(g.exp) < Date.now()) return null;
+  return g.status === 'approved' ? 'approved' : (g.status === 'pending' ? 'pending' : null);
+}
+async function canScore(req, m) {
+  if (keyEq(req.headers['x-scorer-key'], m.keyHash)) {
+    const st = await scorerDeviceGrant(m.id, req.headers['x-scorer-device']);
+    if (st === 'approved') return true;
+  }
+  return organiserOwnsMatch(req, m);
 }
 
 // Match days are plain YYYY-MM-DD strings chosen by the user, never converted between timezones.
@@ -1197,6 +1219,71 @@ async function handle(req, res) {
     const out = { id, name, orgKey: key, calendarPath: '/t/' + id };
     if (committed === false) { out.degraded = true; out.notice = 'Saved on the server. Firebase sync is pending.'; }
     return send(res, 201, out);
+  }
+  // A ground device claims scoring for one match with its scorer link. The organiser
+  // approves the pending claim remotely from the console; the raw link alone writes nothing.
+  if ((mt = p.match(/^\/api\/matches\/([a-z0-9]{6,12})\/scorer-claim$/)) && req.method === 'POST') {
+    const ip = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
+    if (badAuth(ip) || limited(ip)) return send(res, 429, { error: 'Too many attempts. Try again later.' });
+    const m = await store.get(mt[1]);
+    if (!m) return send(res, 404, { error: 'Match not found' });
+    if (!keyEq(req.headers['x-scorer-key'], m.keyHash)) { noteBad(ip); return send(res, 403, { error: 'Use this match\'s scorer link.' }); }
+    const body = await readBody(req, 2000);
+    const label = String((body && body.label) || '').replace(/[^A-Za-z0-9 .\-]/g, '').trim().slice(0, 40);
+    const token = rnd(24);
+    const now = Date.now();
+    await store.setSetting(scorerDevKey(m.id, token), JSON.stringify({
+      matchId: m.id, status: 'pending', label,
+      created: new Date(now).toISOString(), exp: new Date(now + SCORER_DEVICE_TTL_MS).toISOString(),
+    }));
+    auditOrg('scorer_device_claimed', { match: m.id, ip });
+    return send(res, 201, { ok: true, device: token, status: 'pending' });
+  }
+  // The claiming device polls its own status while it waits for approval.
+  if ((mt = p.match(/^\/api\/matches\/([a-z0-9]{6,12})\/scorer-claim$/)) && req.method === 'GET') {
+    const m = await store.get(mt[1]);
+    if (!m) return send(res, 404, { error: 'Match not found' });
+    if (!keyEq(req.headers['x-scorer-key'], m.keyHash)) return send(res, 403, { error: 'Use this match\'s scorer link.' });
+    return send(res, 200, { status: (await scorerDeviceGrant(m.id, req.headers['x-scorer-device'])) || 'none' });
+  }
+  // Console: list pending/approved ground devices across matches. Tokens never leave
+  // the server - claims are identified by match, label, time and a short suffix.
+  if (p === '/api/scorer-devices' && req.method === 'GET') {
+    if (!(await validOrgSession(req.headers['x-org-session']))) return send(res, 401, { error: 'Sign in as organiser.' });
+    if (await orgpassLegacy()) return send(res, 403, { error: 'Set a new organiser password first.', resetRequired: true });
+    const rows = await store.listSettings('scorerdev_');
+    const out = [];
+    for (const r of rows) {
+      let g = null; try { g = JSON.parse(r.v); } catch (e) { continue; }
+      if (!g || !g.matchId) continue;
+      const expired = g.exp && Date.parse(g.exp) < Date.now();
+      out.push({ matchId: g.matchId, claim: r.k.slice(-8), status: expired ? 'expired' : g.status, label: g.label || '', created: g.created, exp: g.exp });
+    }
+    out.sort((a, b) => String(a.created).localeCompare(String(b.created)));
+    return send(res, 200, { devices: out });
+  }
+  // Console: approve or revoke one pending/approved claim. Ownership-scoped: the
+  // organiser session must hold proven ownership of the claim's match.
+  if (p === '/api/scorer-devices' && req.method === 'POST') {
+    const body = await readBody(req, 2000);
+    const matchId = body && typeof body.matchId === 'string' ? body.matchId : '';
+    const claim = body && typeof body.claim === 'string' ? body.claim : '';
+    const action = body && body.action;
+    if (!/^[a-z0-9]{6,12}$/.test(matchId) || !/^[a-f0-9]{8}$/.test(claim) || (action !== 'approve' && action !== 'revoke')) {
+      return send(res, 400, { error: 'matchId, claim and action (approve|revoke) required' });
+    }
+    const m = await store.get(matchId);
+    if (!m) return send(res, 404, { error: 'Match not found' });
+    if (!(await organiserOwnsMatch(req, m))) return send(res, 403, { error: 'Sign in as organiser on a device holding this tournament\'s saved access.' });
+    const rows = await store.listSettings('scorerdev_' + matchId + '_');
+    const row = rows.find((r) => r.k.slice(-8) === claim);
+    if (!row) return send(res, 404, { error: 'Claim not found' });
+    let g = null; try { g = JSON.parse(row.v); } catch (e) { g = null; }
+    if (!g) return send(res, 404, { error: 'Claim not found' });
+    g.status = action === 'approve' ? 'approved' : 'revoked';
+    await store.setSetting(row.k, JSON.stringify(g));
+    auditOrg(action === 'approve' ? 'scorer_device_approved' : 'scorer_device_revoked', { match: matchId, claim });
+    return send(res, 200, { ok: true, status: g.status });
   }
   if ((mt = p.match(/^\/api\/matches\/([a-z0-9]{6,12})\/backup$/)) && req.method === 'GET') {
     const ip = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
