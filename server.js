@@ -205,8 +205,10 @@ function makeFirebaseStore(pg) {
     },
     async count() { const fb = await fbMatchIds(); const legacy = (await pg.matchIds()).filter((x) => !fb.includes(x)); return fb.length + legacy.length; },
     async create(m) {
-      await fbd.put('matches/' + m.id, fbMatchRec(m.config, [], 0, iso(), iso()));
+      // Private key first: a failed Firebase write then strands only an invisible key row
+      // (no public record without its manager key; retry with the same id recovers).
       await pg.matchKeySet(m.id, m.keyHash);
+      await fbd.put('matches/' + m.id, fbMatchRec(m.config, [], 0, iso(), iso()));
     },
     async update(id, events, expectRev) {
       const g = await fbd.get('matches/' + id, true);
@@ -271,8 +273,10 @@ function makeFirebaseStore(pg) {
       return true;
     },
     async tcreate(t) {
+      // Postgres first (holds keyHash and the private remainder): a failed Firebase write
+      // leaves a working link-private tournament instead of a public record with no key.
+      await pg.tcreate(t);
       await fbd.put('tournaments/' + t.id, { name: t.name, listed: false, created: iso(), registration: false, teams: [] });
-      await pg.tcreate(t); // holds keyHash and the private remainder
     },
     async tget(id) { return tgetMerged(id); },
     // Migration-only: after the INSERT-only Firebase tournament record is created,
