@@ -275,6 +275,22 @@ function makeFirebaseStore(pg) {
       await pg.tcreate(t); // holds keyHash and the private remainder
     },
     async tget(id) { return tgetMerged(id); },
+    // Migration-only: after the INSERT-only Firebase tournament record is created,
+    // move the Postgres remainder into place (pending teams stay in the teams blob,
+    // employee details of approved teams go to the private side table) WITHOUT any
+    // further Firebase write, so migration never overwrites a Firebase record.
+    async privateSplitAfterMigrate(id, fullTeams) {
+      const fb = await fbTournament(id);
+      if (!fb) throw new Error('Firebase tournament record missing for ' + id);
+      const includePii = id === PUBLIC_DETAIL_TOURNAMENT;
+      const approved = (fullTeams || []).filter((t) => t.status === 'approved');
+      const pending = (fullTeams || []).filter((t) => t.status !== 'approved');
+      await pg.tsetTeams(id, pending);
+      if (!includePii) {
+        for (const t of approved) await pg.teamPiiSet(id, t.id, piiMapOf(t));
+        await pg.teamPiiPrune(id, approved.map((t) => t.id));
+      }
+    },
     async tsetTeams(id, teams) {
       const fb = await fbTournament(id);
       if (!fb) return pg.tsetTeams(id, teams); // legacy link-private tournament: never enters the public path
@@ -587,10 +603,10 @@ async function handle(req, res) {
                 players: tm.players.map((p) => includePii ? { name: p.name, empId: p.empId || '', dept: p.dept || '', role: p.role || '' } : { name: p.name, role: p.role || '' }) })) };
             out.tournaments.push({ id: tid, name: t.name, approvedTeams: approved.length });
             if (!dry) {
-              await fbd.put('tournaments/' + tid, rec);
-              // With the Firebase record in place, the hybrid store re-splits: approved rosters
-              // (public fields) to Firebase, pending teams and employee details stay in Postgres.
-              await store.tsetTeams(tid, cleanStoredTeams(t.teams));
+              await fbd.put('tournaments/' + tid, rec); // INSERT-only: 'existing' was checked absent above
+              // Postgres remainder only (pending teams + private employee details). No second
+              // Firebase write: the record above already carries the full approved projection.
+              await store.privateSplitAfterMigrate(tid, cleanStoredTeams(t.teams));
               if (body.seedBindings === true) await store.setSetting('orgtour_' + tid, t.keyHash);
             }
           }
