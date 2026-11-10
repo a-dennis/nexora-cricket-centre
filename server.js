@@ -21,7 +21,8 @@ function makePgStore() {
       id TEXT PRIMARY KEY, name TEXT NOT NULL, key_hash TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now())`).then(() => pool.query("ALTER TABLE cricket_tournaments ADD COLUMN IF NOT EXISTS teams JSONB NOT NULL DEFAULT '[]', ADD COLUMN IF NOT EXISTS reg_key_hash TEXT, ADD COLUMN IF NOT EXISTS listed BOOLEAN NOT NULL DEFAULT false"));
     const sready = pool.query('CREATE TABLE IF NOT EXISTS cricket_settings (k TEXT PRIMARY KEY, v TEXT)');
     const kready = pool.query('CREATE TABLE IF NOT EXISTS cricket_match_keys (id TEXT PRIMARY KEY, key_hash TEXT NOT NULL)');
-    const pready = pool.query("CREATE TABLE IF NOT EXISTS cricket_team_pii (tid TEXT NOT NULL, team_id TEXT NOT NULL, players JSONB NOT NULL DEFAULT '{}', PRIMARY KEY (tid, team_id))");
+    const fready = pool.query('CREATE TABLE IF NOT EXISTS cricket_fb_manifest (id TEXT PRIMARY KEY, kind TEXT NOT NULL, since TIMESTAMPTZ NOT NULL DEFAULT now())');
+    const nready = pool.query('CREATE TABLE IF NOT EXISTS cricket_replica_snapshots (seq BIGSERIAL PRIMARY KEY, entity_id TEXT NOT NULL, at TIMESTAMPTZ NOT NULL DEFAULT now(), payload JSONB NOT NULL)');
     const row = (r) => r && { id: r.id, config: r.config, events: r.events, keyHash: r.key_hash, rev: r.rev, updated: r.updated_at };
     return {
       kind: 'durable',
@@ -31,9 +32,13 @@ function makePgStore() {
       async matchIds() { await ready; const r = await pool.query('SELECT id FROM cricket_matches'); return r.rows.map((x) => x.id); },
       async deleteMatchRow(id) { await ready; await pool.query('DELETE FROM cricket_matches WHERE id=$1', [id]); },
       async deleteAllMatchRows() { await ready; await pool.query('DELETE FROM cricket_matches'); },
-      async teamPiiSet(tid, teamId, players) { await pready; await pool.query('INSERT INTO cricket_team_pii(tid,team_id,players) VALUES($1,$2,$3) ON CONFLICT (tid,team_id) DO UPDATE SET players=$3', [tid, teamId, JSON.stringify(players)]); },
-      async teamPiiGet(tid) { await pready; const r = await pool.query('SELECT team_id, players FROM cricket_team_pii WHERE tid=$1', [tid]); const out = {}; for (const x of r.rows) out[x.team_id] = x.players || {}; return out; },
-      async teamPiiPrune(tid, keepTeamIds) { await pready; await pool.query('DELETE FROM cricket_team_pii WHERE tid=$1 AND NOT (team_id = ANY($2))', [tid, keepTeamIds && keepTeamIds.length ? keepTeamIds : ['__none__']]); },
+      async matchKeysGet(ids) { await kready; if (!ids || !ids.length) return {}; const r = await pool.query('SELECT id, key_hash FROM cricket_match_keys WHERE id = ANY($1)', [ids]); const out = {}; for (const x of r.rows) out[x.id] = x.key_hash; return out; },
+      async manifestSet(id, kind) { await fready; await pool.query('INSERT INTO cricket_fb_manifest(id,kind) VALUES($1,$2) ON CONFLICT (id) DO UPDATE SET kind=$2', [id, kind]); },
+      async manifestGet(id) { await fready; const r = await pool.query('SELECT kind FROM cricket_fb_manifest WHERE id=$1', [id]); return r.rows[0] ? r.rows[0].kind : null; },
+      async manifestDel(id) { await fready; await pool.query('DELETE FROM cricket_fb_manifest WHERE id=$1', [id]); },
+      async manifestIds() { await fready; const r = await pool.query('SELECT id, kind FROM cricket_fb_manifest'); const out = {}; for (const x of r.rows) out[x.id] = x.kind; return out; },
+      async snapshotSave(entityId, payload) { await nready; await pool.query('INSERT INTO cricket_replica_snapshots(entity_id,payload) VALUES($1,$2)', [entityId, JSON.stringify(payload)]); },
+      async exportMatchUpdate(id, config, events, rev, updated, expectRev) { await ready; const r = await pool.query('UPDATE cricket_matches SET config=$1, events=$2, rev=$3, updated_at=$4 WHERE id=$5 AND rev=$6', [JSON.stringify(config), JSON.stringify(events), rev, updated, id, expectRev]); return r.rowCount === 1; },
       async replaceAllMatches(expected, fresh) {
         await ready; const c = await pool.connect();
         try {
@@ -63,6 +68,9 @@ function makePgStore() {
       async tcreate(t) { await tready; await pool.query('INSERT INTO cricket_tournaments(id,name,key_hash) VALUES($1,$2,$3)', [t.id, t.name, t.keyHash]); },
       async tget(id) { await tready; const r = await pool.query('SELECT * FROM cricket_tournaments WHERE id=$1', [id]); const x = r.rows[0]; return x && { id: x.id, name: x.name, keyHash: x.key_hash, teams: Array.isArray(x.teams) ? x.teams : [], regKeyHash: x.reg_key_hash || null, listed: !!x.listed }; },
       async tsetTeams(id, teams) { await tready; await pool.query('UPDATE cricket_tournaments SET teams=$2 WHERE id=$1', [id, JSON.stringify(teams)]); },
+      async tmutateTeams(id, fn) { await tready; const t = await this.tget(id); if (!t) return false; const teams = fn(t.teams || []); if (!teams) return true; await pool.query('UPDATE cricket_tournaments SET teams=$2 WHERE id=$1', [id, JSON.stringify(teams)]); return true; },
+      async manifestSet(id, kind) { return false; },
+      async reconcileFromFirebase(dry) { return { dryRun: !!dry, note: 'postgres mode: nothing to reconcile', lifted: [], insertedMatches: [], repairedMatches: [], repairedTournaments: [], syncedFlags: [], conflicts: [], errors: [] }; },
       async tsetReg(id, regKeyHash) { await tready; await pool.query('UPDATE cricket_tournaments SET reg_key_hash=$2 WHERE id=$1', [id, regKeyHash]); },
       async getSetting(k) { await sready; const r = await pool.query('SELECT v FROM cricket_settings WHERE k=$1', [k]); return r.rows[0] ? r.rows[0].v : null; },
       async setSetting(k, v) { await sready; if (v === null) { await pool.query('DELETE FROM cricket_settings WHERE k=$1', [k]); return; } await pool.query('INSERT INTO cricket_settings(k,v) VALUES($1,$2) ON CONFLICT (k) DO UPDATE SET v=$2', [k, v]); },
@@ -115,6 +123,9 @@ function makeFileStore() {
     async tget(id) { const t = tdb[id]; return t ? Object.assign({}, t) : null; },
     async trename(id, name) { if (!tdb[id]) return false; tdb[id].name = name; tsave(); return true; },
     async tsetTeams(id, teams) { if (tdb[id]) { tdb[id].teams = teams; tsave(); } },
+    async tmutateTeams(id, fn) { const t = tdb[id]; if (!t) return false; const teams = fn(t.teams || []); if (!teams) return true; t.teams = teams; tsave(); return true; },
+    async manifestSet(id, kind) { return false; },
+    async reconcileFromFirebase(dry) { return { dryRun: !!dry, note: 'temporary store: nothing to reconcile', lifted: [], insertedMatches: [], repairedMatches: [], repairedTournaments: [], syncedFlags: [], conflicts: [], errors: [] }; },
     async tsetReg(id, regKeyHash) { if (tdb[id]) { tdb[id].regKeyHash = regKeyHash; tsave(); } },
     async getSetting(k) { return sdb[k] !== undefined ? sdb[k] : null; },
     async setSetting(k, v) { if (v === null) { delete sdb[k]; } else { sdb[k] = v; } ssave(); },
@@ -144,35 +155,49 @@ function makeFirebaseStore(pg) {
   const fbd = require('./firebase-db');
   const iso = () => new Date().toISOString();
   const fbMatchRec = (config, events, rev, created, updated) => ({ config, events, rev, created: created || iso(), updated: updated || iso() });
-  const piiMapOf = (t) => { const m = {}; for (const p of (t.players || [])) { if (p && p.name) m[String(p.name).toLowerCase()] = { empId: p.empId || '', dept: p.dept || '' }; } return m; };
-  const publicTeam = (t, includePii) => ({
+  // Firebase records carry PUBLIC fields only - never employee IDs or departments,
+  // for ANY tournament including whxrz4tw. The PII merge join key is (team id, player
+  // name lowercase): safe because no player-rename route exists; any future roster-edit
+  // feature must thread empId through the mutation or this join breaks silently.
+  const publicTeam = (t) => ({
     id: t.id, name: t.name, submittedAt: t.submittedAt,
-    players: (t.players || []).map((p) => includePii
-      ? { name: p.name, empId: p.empId || '', dept: p.dept || '', role: p.role || '' }
-      : { name: p.name, role: p.role || '' }),
+    players: (t.players || []).map((p) => ({ name: p.name, role: p.role || '' })),
   });
   async function fbTournament(id) { const t = await fbd.get('tournaments/' + id); return t && typeof t === 'object' ? t : null; }
-  async function fbMatchIds() { const m = await fbd.get('matches'); return m && typeof m === 'object' ? Object.keys(m) : []; }
+  async function fbMatchIds() { const m = await fbd.getShallow('matches'); return m && typeof m === 'object' ? Object.keys(m) : []; }
+  const canonicalMissing = (kind, id) => { const e = new Error('Canonical Firebase record missing for ' + kind + ' ' + id); e.status = 500; return e; };
   async function matchKeyHash(id, legacyRow) {
     let keyHash = await pg.matchKeyGet(id);
     if (!keyHash) { const legacy = legacyRow !== undefined ? legacyRow : await pg.get(id); keyHash = (legacy && legacy.keyHash) || ''; }
     return keyHash;
   }
   async function tgetMerged(id) {
-    const fb = await fbTournament(id);
+    const fb = await fbTournament(id); // throws (loud 500) on Firebase errors; null = absent
+    if (!fb) {
+      const kind = await pg.manifestGet(id);
+      if (kind === 'tournament') throw canonicalMissing('tournament', id); // was Firebase-canonical: never resurrect the stale replica
+      return pg.tget(id); // true legacy link-private, or degraded create (Postgres canonical until reconcile lifts)
+    }
     const legacy = await pg.tget(id);
-    if (!fb && !legacy) return null;
-    if (!fb) return legacy;
-    const includePii = id === PUBLIC_DETAIL_TOURNAMENT;
-    const pii = includePii ? {} : await pg.teamPiiGet(id);
-    const pending = legacy && Array.isArray(legacy.teams) ? legacy.teams.filter((t) => t.status !== 'approved') : [];
-    const approved = (Array.isArray(fb.teams) ? fb.teams : []).map((t) => ({
-      id: t.id, name: t.name, submittedAt: t.submittedAt, status: 'approved',
-      players: (Array.isArray(t.players) ? t.players : []).map((p) => {
-        const priv = (pii[t.id] || {})[String(p.name || '').toLowerCase()] || {};
-        return { name: p.name, empId: includePii ? (p.empId || '') : (priv.empId || ''), dept: includePii ? (p.dept || '') : (priv.dept || ''), role: p.role || '' };
-      }),
-    }));
+    const blobTeams = legacy && Array.isArray(legacy.teams) ? legacy.teams : [];
+    const blobById = {};
+    for (const t of blobTeams) if (t && t.id) blobById[t.id] = t;
+    const approved = (Array.isArray(fb.teams) ? fb.teams : []).map((t) => {
+      const blob = blobById[t.id] || {};
+      const byName = {};
+      for (const p of (blob.players || [])) if (p && p.name) byName[String(p.name).toLowerCase()] = p;
+      return {
+        id: t.id, name: t.name, submittedAt: t.submittedAt || blob.submittedAt, status: 'approved',
+        players: (Array.isArray(t.players) ? t.players : []).map((p) => {
+          const priv = byName[String(p.name || '').toLowerCase()] || {};
+          return { name: p.name, empId: priv.empId || '', dept: priv.dept || '', role: p.role || '' };
+        }),
+      };
+    });
+    const approvedIds = new Set(approved.map((t) => t.id));
+    // Dedupe by TEAM ID: a team approved in Firebase never reappears as pending,
+    // even if the Postgres remainder lagged (or a same-named team exists).
+    const pending = blobTeams.filter((t) => t && t.status !== 'approved' && !approvedIds.has(t.id));
     return {
       id,
       name: fb.name,
@@ -201,26 +226,50 @@ function makeFirebaseStore(pg) {
     async get(id) {
       const fb = await fbd.get('matches/' + id);
       if (fb && typeof fb === 'object') return { id, config: fb.config, events: Array.isArray(fb.events) ? fb.events : [], keyHash: await matchKeyHash(id), rev: fb.rev || 0, updated: fb.updated, created: fb.created };
-      return pg.get(id);
+      const kind = await pg.manifestGet(id);
+      if (kind === 'match') throw canonicalMissing('match', id); // was Firebase-canonical: never resurrect the stale replica
+      return pg.get(id); // legacy or degraded (Postgres canonical until reconcile lifts)
     },
     async count() { const fb = await fbMatchIds(); const legacy = (await pg.matchIds()).filter((x) => !fb.includes(x)); return fb.length + legacy.length; },
     async create(m) {
-      // Private key first: a failed Firebase write then strands only an invisible key row
-      // (no public record without its manager key; retry with the same id recovers).
+      // Private key + degraded marker first, then the canonical Firebase record. If the
+      // Firebase write fails the match is created degraded: a Postgres replica row keeps
+      // it working link-privately and reconcile lifts it into Firebase later.
       await pg.matchKeySet(m.id, m.keyHash);
-      await fbd.put('matches/' + m.id, fbMatchRec(m.config, [], 0, iso(), iso()));
+      await pg.manifestSet(m.id, 'match-degraded');
+      try {
+        await fbd.put('matches/' + m.id, fbMatchRec(m.config, [], 0, iso(), iso()));
+      } catch (e) {
+        await pg.importMatch({ id: m.id, config: m.config, events: [], keyHash: m.keyHash, rev: 0, created: iso(), updated: iso() });
+        return;
+      }
+      await pg.manifestSet(m.id, 'match');
+      try { await pg.importMatch({ id: m.id, config: m.config, events: [], keyHash: m.keyHash, rev: 0, created: iso(), updated: iso() }); }
+      catch (e) { console.error('replica insert failed for match ' + m.id + ' (reconcile repairs)', e); }
     },
     async update(id, events, expectRev) {
       const g = await fbd.get('matches/' + id, true);
-      if (!g.data || typeof g.data !== 'object') return pg.update(id, events, expectRev);
+      if (!g.data || typeof g.data !== 'object') {
+        const kind = await pg.manifestGet(id);
+        if (kind === 'match') throw canonicalMissing('match', id);
+        return pg.update(id, events, expectRev);
+      }
       if ((g.data.rev || 0) !== expectRev) return false;
       const next = Object.assign({}, g.data, { events, rev: expectRev + 1, updated: iso() });
-      try { await fbd.put('matches/' + id, next, g.etag || undefined); return true; }
+      try { await fbd.put('matches/' + id, next, g.etag || undefined); }
       catch (e) { if (e.status === 412) return false; throw e; }
+      // Canonical commit succeeded. Replica update is best-effort; reconcile repairs drift.
+      try { await pg.exportMatchUpdate(id, next.config, events, expectRev + 1, next.updated, expectRev); }
+      catch (e) { console.error('replica update failed for match ' + id + ' (reconcile repairs)', e); }
+      return true;
     },
     async setConfig(id, config, bump) {
       const g = await fbd.get('matches/' + id, true);
-      if (!g.data || typeof g.data !== 'object') return pg.setConfig(id, config, bump);
+      if (!g.data || typeof g.data !== 'object') {
+        const kind = await pg.manifestGet(id);
+        if (kind === 'match') throw canonicalMissing('match', id);
+        return pg.setConfig(id, config, bump);
+      }
       const attempt = (cur, etag) => {
         const next = Object.assign({}, cur, { config });
         if (bump) { next.rev = (cur.rev || 0) + 1; next.updated = iso(); }
@@ -233,15 +282,21 @@ function makeFirebaseStore(pg) {
         if (!g2.data || typeof g2.data !== 'object') throw e;
         await attempt(g2.data, g2.etag); // a second conflict surfaces as an error
       }
+      // Canonical commit succeeded; replica is best-effort, reconcile repairs drift.
+      try { const cur = await fbd.get('matches/' + id); if (cur) await pg.exportMatchUpdate(id, config, cur.events || [], cur.rev || 0, cur.updated || iso(), (cur.rev || 0) - (bump ? 1 : 0)); } catch (e) { console.error('replica setConfig failed for ' + id + ' (reconcile repairs)', e); }
     },
+    // Bounded read: server-side filtered query (orderBy/equalTo), re-filtered client-side
+    // as a safety net. Never downloads the whole matches subtree on a serving path.
     async byTournament(tid) {
-      const fbAll = await fbd.get('matches');
-      const fbIds = fbAll && typeof fbAll === 'object' ? Object.keys(fbAll) : [];
-      const out = [];
-      for (const id of fbIds) {
-        const r = fbAll[id];
-        if (r && r.config && r.config.tid === tid) out.push({ id, config: r.config, events: Array.isArray(r.events) ? r.events : [], keyHash: await matchKeyHash(id), rev: r.rev || 0, updated: r.updated, created: r.created });
-      }
+      const found = await fbd.query('matches', 'config/tid', tid);
+      const fbIds = found && typeof found === 'object'
+        ? Object.keys(found).filter((k) => found[k] && found[k].config && found[k].config.tid === tid)
+        : [];
+      const keyMap = await pg.matchKeysGet(fbIds);
+      const out = fbIds.map((id) => {
+        const r = found[id];
+        return { id, config: r.config, events: Array.isArray(r.events) ? r.events : [], keyHash: keyMap[id] || '', rev: r.rev || 0, updated: r.updated, created: r.created };
+      });
       for (const m of await pg.byTournament(tid)) if (!fbIds.includes(m.id)) out.push(m);
       return out;
     },
@@ -258,62 +313,74 @@ function makeFirebaseStore(pg) {
       const keyHash = await matchKeyHash(expected.id, legacy);
       const cur = { id: expected.id, config: g.config, events: Array.isArray(g.events) ? g.events : [], keyHash, rev: g.rev || 0 };
       if (matchSnapshot([cur]) !== matchSnapshot([expected])) return false;
+      await pg.snapshotSave('match:' + expected.id, cur); // version preserved before the owner-authorised delete
       await fbd.del('matches/' + expected.id);
       await pg.matchKeyDel(expected.id);
-      if (legacy) await pg.deleteMatchRow(expected.id); // drop the stale migrated copy
+      await pg.manifestDel(expected.id);
+      if (legacy) await pg.deleteMatchRow(expected.id); // drop the stale migrated/replica copy
       return true;
     },
     async replaceAllMatches(expected, fresh) {
       const all = await allMatchesMerged();
       if (matchSnapshot(all) !== matchSnapshot(expected)) return false;
-      for (const id of await fbMatchIds()) { await fbd.del('matches/' + id); await pg.matchKeyDel(id); }
+      await pg.snapshotSave('matches:all', all); // version preserved before the owner-authorised replace
+      for (const id of await fbMatchIds()) { await fbd.del('matches/' + id); await pg.matchKeyDel(id); await pg.manifestDel(id); }
       await pg.deleteAllMatchRows();
       await fbd.put('matches/' + fresh.id, fbMatchRec(fresh.config, [], 0, iso(), iso()));
       await pg.matchKeySet(fresh.id, fresh.keyHash);
+      await pg.manifestSet(fresh.id, 'match');
       return true;
     },
     async tcreate(t) {
-      // Postgres first (holds keyHash and the private remainder): a failed Firebase write
-      // leaves a working link-private tournament instead of a public record with no key.
+      // Postgres first (secrets + durable row + degraded marker): if the canonical
+      // Firebase write fails, the tournament works link-privately and reconcile lifts it.
       await pg.tcreate(t);
-      await fbd.put('tournaments/' + t.id, { name: t.name, listed: false, created: iso(), registration: false, teams: [] });
+      await pg.manifestSet(t.id, 'tournament-degraded');
+      try {
+        await fbd.put('tournaments/' + t.id, { name: t.name, listed: false, created: iso(), registration: false, teams: [] });
+        await pg.manifestSet(t.id, 'tournament');
+      } catch (e) { console.error('Firebase tournament create degraded for ' + t.id + ' (reconcile lifts)', e); }
     },
     async tget(id) { return tgetMerged(id); },
-    // Migration-only: after the INSERT-only Firebase tournament record is created,
-    // move the Postgres remainder into place (pending teams stay in the teams blob,
-    // employee details of approved teams go to the private side table) WITHOUT any
-    // further Firebase write, so migration never overwrites a Firebase record.
-    async privateSplitAfterMigrate(id, fullTeams) {
-      const fb = await fbTournament(id);
-      if (!fb) throw new Error('Firebase tournament record missing for ' + id);
-      const includePii = id === PUBLIC_DETAIL_TOURNAMENT;
-      const approved = (fullTeams || []).filter((t) => t.status === 'approved');
-      const pending = (fullTeams || []).filter((t) => t.status !== 'approved');
-      await pg.tsetTeams(id, pending);
-      if (!includePii) {
-        for (const t of approved) await pg.teamPiiSet(id, t.id, piiMapOf(t));
-        await pg.teamPiiPrune(id, approved.map((t) => t.id));
+    // Compare-and-swap TRANSFORM for roster intents: re-read with ETag, apply the
+    // caller's mutation to the merged state, conditional commit, bounded retry on 412.
+    // Both intents survive concurrent edits (captain submit vs organiser approve).
+    // fn(teams) returns the next full roster, or null for a no-op/conflict signalled by the route.
+    async tmutateTeams(id, fn) {
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const cur = await fbd.get('tournaments/' + id, true);
+        if (!cur.data || typeof cur.data !== 'object') {
+          const kind = await pg.manifestGet(id);
+          if (kind === 'tournament') throw canonicalMissing('tournament', id);
+          const legacy = await pg.tget(id);
+          if (!legacy) return false;
+          const teams = fn(legacy.teams || []);
+          if (!teams) return true;
+          await pg.tsetTeams(id, teams);
+          return true;
+        }
+        const merged = await tgetMerged(id);
+        if (!merged) return false;
+        const teams = fn(merged.teams || []);
+        if (!teams) return true;
+        const approved = teams.filter((t) => t && t.status === 'approved').map((t) => publicTeam(t));
+        try {
+          await fbd.patch('tournaments/' + id, { teams: approved }, cur.etag || undefined);
+        } catch (e) { if (e.status === 412) continue; throw e; }
+        // Canonical commit done. Replica remainder (FULL roster incl. pending + PII) in Postgres.
+        await pg.tsetTeams(id, teams); // failure -> 500; dedupe-on-read + reconcile converge
+        return true;
       }
-    },
-    async tsetTeams(id, teams) {
-      const fb = await fbTournament(id);
-      if (!fb) return pg.tsetTeams(id, teams); // legacy link-private tournament: never enters the public path
-      const includePii = id === PUBLIC_DETAIL_TOURNAMENT;
-      const approved = (teams || []).filter((t) => t.status === 'approved');
-      const pending = (teams || []).filter((t) => t.status !== 'approved');
-      await fbd.put('tournaments/' + id, Object.assign({}, fb, { teams: approved.map((t) => publicTeam(t, includePii)) }));
-      await pg.tsetTeams(id, pending);
-      if (!includePii) {
-        for (const t of approved) await pg.teamPiiSet(id, t.id, piiMapOf(t));
-        await pg.teamPiiPrune(id, approved.map((t) => t.id));
-      }
+      return false; // CAS retries exhausted -> route maps this to a 409
     },
     async tsetReg(id, regKeyHash) {
+      // Registration key hash is a Postgres secret and leads; the Firebase flag is its projection.
+      await pg.tsetReg(id, regKeyHash);
       const fb = await fbTournament(id);
       if (fb) await fbd.patch('tournaments/' + id, { registration: !!regKeyHash });
-      await pg.tsetReg(id, regKeyHash);
     },
     async tsetListed(id, listed) {
+      // Listed is public canonical in Firebase; the Postgres row is the replica.
       const fb = await fbTournament(id);
       if (fb) await fbd.patch('tournaments/' + id, { listed: !!listed });
       return pg.tsetListed(id, listed);
@@ -324,25 +391,113 @@ function makeFirebaseStore(pg) {
       return pg.trename(id, name);
     },
     async tcount() {
-      const all = await fbd.get('tournaments');
+      const all = await fbd.getShallow('tournaments');
       const fbIds = all && typeof all === 'object' ? Object.keys(all) : [];
       const legacy = await pg.allTournaments();
       return fbIds.length + legacy.filter((t) => !fbIds.includes(t.id)).length;
     },
+    // Bounded read: server-side filtered query (listed=true), re-filtered client-side.
     async listedTournaments() {
-      const all = await fbd.get('tournaments');
+      const found = await fbd.query('tournaments', 'listed', true);
       const out = [];
       const fbIds = [];
-      if (all && typeof all === 'object') for (const id of Object.keys(all)) { fbIds.push(id); if (all[id] && all[id].listed) out.push({ id, name: all[id].name }); }
+      if (found && typeof found === 'object') for (const id of Object.keys(found)) { if (found[id] && found[id].listed) { fbIds.push(id); out.push({ id, name: found[id].name }); } }
       for (const t of await pg.listedTournaments()) if (!fbIds.includes(t.id)) out.push(t);
       return out;
     },
+    // Backup-only path (owner-triggered): whole-subtree reads are acceptable here.
     async allTournaments() {
       const all = await fbd.get('tournaments');
       const fbIds = all && typeof all === 'object' ? Object.keys(all) : [];
       const out = [];
       for (const id of fbIds) { const t = await tgetMerged(id); if (t) out.push(t); }
       for (const t of await pg.allTournaments()) if (!fbIds.includes(t.id)) out.push(t);
+      return out;
+    },
+    manifestSet: (id, kind) => pg.manifestSet(id, kind),
+    // Reconcile Postgres replicas/secrets to the canonical Firebase state. Dry-run unless
+    // apply=false. Versioned: every repair write snapshots the previous replica first
+    // (cricket_replica_snapshots, append-only). Firebase is never modified by reconcile
+    // except lifting degraded creates (INSERT-only, their intended canonical home).
+    async reconcileFromFirebase(dry) {
+      const out = { dryRun: dry, lifted: [], insertedMatches: [], repairedMatches: [], repairedTournaments: [], syncedFlags: [], conflicts: [], errors: [] };
+      // 1. Degraded creates (Postgres-only after a Firebase outage) -> lift into Firebase.
+      const man = await pg.manifestIds();
+      for (const id of Object.keys(man)) {
+        try {
+          if (man[id] === 'tournament-degraded') {
+            if (await fbTournament(id)) { if (!dry) await pg.manifestSet(id, 'tournament'); continue; }
+            const legacy = await pg.tget(id);
+            if (!legacy) { out.conflicts.push({ id, reason: 'degraded tournament missing from Postgres' }); continue; }
+            const approved = cleanStoredTeams(legacy.teams).filter((x) => x.status === 'approved').map((t) => publicTeam(t));
+            out.lifted.push({ tournament: id });
+            if (!dry) { await fbd.put('tournaments/' + id, { name: legacy.name, listed: !!legacy.listed, created: legacy.created || iso(), registration: !!legacy.regKeyHash, teams: approved }); await pg.manifestSet(id, 'tournament'); }
+          }
+          if (man[id] === 'match-degraded') {
+            if (await fbd.get('matches/' + id)) { if (!dry) await pg.manifestSet(id, 'match'); continue; }
+            const legacy = await pg.get(id);
+            if (!legacy) { out.conflicts.push({ id, reason: 'degraded match missing from Postgres' }); continue; }
+            out.lifted.push({ match: id });
+            if (!dry) { await fbd.put('matches/' + id, fbMatchRec(legacy.config, legacy.events || [], legacy.rev || 0, legacy.created, legacy.updated)); await pg.manifestSet(id, 'match'); }
+          }
+        } catch (e) { out.errors.push({ id, error: String((e && e.message) || e).slice(0, 200) }); }
+      }
+      // 2. Canonical tournaments: converge the Postgres replica row to Firebase truth.
+      const tshallow = await fbd.getShallow('tournaments');
+      const fbTids = tshallow && typeof tshallow === 'object' ? Object.keys(tshallow) : [];
+      for (const id of fbTids) {
+        try {
+          const merged = await tgetMerged(id);
+          if (!merged) continue;
+          const legacy = await pg.tget(id);
+          if (!legacy) { out.conflicts.push({ tournament: id, reason: 'canonical Firebase tournament has no Postgres row - owner action needed (key cannot be fabricated)' }); continue; }
+          const blobSame = JSON.stringify(stableValue(cleanStoredTeams(legacy.teams))) === JSON.stringify(stableValue(cleanStoredTeams(merged.teams)));
+          const metaSame = legacy.name === merged.name && !!legacy.listed === !!merged.listed;
+          if (!blobSame || !metaSame) {
+            out.repairedTournaments.push({ tournament: id, teams: !blobSame, meta: !metaSame });
+            if (!dry) {
+              await pg.snapshotSave('tournament:' + id, legacy);
+              await pg.tsetTeams(id, merged.teams);
+              if (legacy.name !== merged.name) await pg.trename(id, merged.name);
+              if (!!legacy.listed !== !!merged.listed) await pg.tsetListed(id, merged.listed);
+            }
+          }
+          // registration flag: Postgres secret leads, Firebase flag follows
+          const fb = await fbTournament(id);
+          if (fb && !!fb.registration !== !!merged.regKeyHash) {
+            out.syncedFlags.push({ tournament: id, registration: !!merged.regKeyHash });
+            if (!dry) await fbd.patch('tournaments/' + id, { registration: !!merged.regKeyHash });
+          }
+        } catch (e) { out.errors.push({ tournament: id, error: String((e && e.message) || e).slice(0, 200) }); }
+      }
+      // 3. Canonical matches: insert missing replicas, set diverged replicas to canonical.
+      const mshallow = await fbd.getShallow('matches');
+      const fbMids = mshallow && typeof mshallow === 'object' ? Object.keys(mshallow) : [];
+      for (const id of fbMids) {
+        try {
+          const fb = await fbd.get('matches/' + id);
+          if (!fb || typeof fb !== 'object' || !fb.config) continue;
+          const fbEvents = Array.isArray(fb.events) ? fb.events : [];
+          const legacy = await pg.get(id);
+          if (!legacy) {
+            const keyHash = await pg.matchKeyGet(id);
+            if (!keyHash) { out.conflicts.push({ match: id, reason: 'no manager key in Postgres - not exported' }); continue; }
+            out.insertedMatches.push({ match: id, events: fbEvents.length });
+            if (!dry) await pg.importMatch({ id, config: fb.config, events: fbEvents, keyHash, rev: fb.rev || 0, created: fb.created, updated: fb.updated });
+            continue;
+          }
+          const sameEvents = JSON.stringify(legacy.events || []) === JSON.stringify(fbEvents);
+          const sameConfig = JSON.stringify(stableValue(legacy.config)) === JSON.stringify(stableValue(fb.config));
+          if (!sameEvents || !sameConfig || (legacy.rev || 0) !== (fb.rev || 0)) {
+            out.repairedMatches.push({ match: id, events: !sameEvents, config: !sameConfig, rev: (legacy.rev || 0) !== (fb.rev || 0) });
+            if (!dry) {
+              await pg.snapshotSave('match:' + id, legacy);
+              const okUp = await pg.exportMatchUpdate(id, fb.config, fbEvents, fb.rev || 0, fb.updated || iso(), legacy.rev || 0);
+              if (!okUp) out.conflicts.push({ match: id, reason: 'replica changed concurrently - rerun reconcile' });
+            }
+          }
+        } catch (e) { out.errors.push({ match: id, error: String((e && e.message) || e).slice(0, 200) }); }
+      }
       return out;
     },
     async importTournament(t) {
@@ -571,7 +726,7 @@ async function handle(req, res) {
     return send(res, 200, { ok: true });
   }
   let mt;
-  if (p === '/api/admin/delete-match' || p === '/api/backup' || p === '/api/restore' || p === '/api/admin/tournament-name' || p === '/api/admin/tournament-listed' || p === '/api/admin/replace-matches' || p === '/api/admin/firebase-migrate') {
+  if (p === '/api/admin/delete-match' || p === '/api/backup' || p === '/api/restore' || p === '/api/admin/tournament-name' || p === '/api/admin/tournament-listed' || p === '/api/admin/replace-matches' || p === '/api/admin/firebase-migrate' || p === '/api/admin/firebase-reconcile') {
     // Owner-only. Disabled unless BACKUP_TOKEN is set. Backups contain match data and hashed keys, never raw keys.
     const tok = process.env.BACKUP_TOKEN;
     if (!tok || tok.length < 24) return send(res, 404, { error: 'Unknown API' });
@@ -584,45 +739,50 @@ async function handle(req, res) {
         counts: { matches: ms.length, tournaments: ts.length }, tournaments: ts, matches: ms });
     }
     if (p === '/api/admin/firebase-migrate' && req.method === 'POST') {
-      // One-time INSERT-only copy of the two public tournaments and their matches into
-      // nexoraCentre/. Never overwrites an existing Firebase record, never deletes anything.
-      // Default is a dry run that only reports what would be copied; {apply:true} executes.
-      // {seedBindings:true} also saves organiser access for these tournaments - only ever
-      // sent after the owner explicitly confirms the binding for that tournament.
+      // One-time INSERT-only copy of the public tournament(s) and their matches into
+      // nexoraCentre/. Never overwrites an existing Firebase record, never deletes or
+      // rewrites any Postgres data (the Postgres originals stay exactly as they were -
+      // they become the recovery replica). Default is a dry run; {apply:true} executes.
+      // Unlisted tournaments (e.g. hovxdntl) are skipped unless {includeUnlisted:true}
+      // is sent, which only happens after the owner confirms the audience for that data.
+      // Firebase records NEVER carry employee IDs/departments, for any tournament.
       const body = await readBody(req, 2000);
       const dry = !body || body.apply !== true;
+      const includeUnlisted = !!(body && body.includeUnlisted === true);
       const fbd = require('./firebase-db');
       const out = { dryRun: dry, tournaments: [], matches: [], skipped: [], errors: [] };
       for (const tid of ['whxrz4tw', 'hovxdntl']) {
         try {
           const t = await store.tget(tid);
           if (!t) { out.skipped.push({ tournament: tid, reason: 'missing' }); continue; }
+          if (!t.listed && !includeUnlisted) { out.skipped.push({ tournament: tid, reason: 'unlisted - owner audience approval required' }); continue; }
           const existing = await fbd.get('tournaments/' + tid);
           if (existing) { out.skipped.push({ tournament: tid, reason: 'already in Firebase' }); }
           else {
-            const includePii = tid === PUBLIC_DETAIL_TOURNAMENT;
             const approved = cleanStoredTeams(t.teams).filter((x) => x.status === 'approved');
             const rec = { name: t.name, listed: !!t.listed, created: t.created || new Date().toISOString(), registration: !!t.regKeyHash,
               teams: approved.map((tm) => ({ id: tm.id, name: tm.name, submittedAt: tm.submittedAt,
-                players: tm.players.map((p) => includePii ? { name: p.name, empId: p.empId || '', dept: p.dept || '', role: p.role || '' } : { name: p.name, role: p.role || '' }) })) };
+                players: tm.players.map((p) => ({ name: p.name, role: p.role || '' })) })) };
             out.tournaments.push({ id: tid, name: t.name, approvedTeams: approved.length });
-            if (!dry) {
-              await fbd.put('tournaments/' + tid, rec); // INSERT-only: 'existing' was checked absent above
-              // Postgres remainder only (pending teams + private employee details). No second
-              // Firebase write: the record above already carries the full approved projection.
-              await store.privateSplitAfterMigrate(tid, cleanStoredTeams(t.teams));
-              if (body.seedBindings === true) await store.setSetting('orgtour_' + tid, t.keyHash);
-            }
+            if (!dry) { await fbd.put('tournaments/' + tid, rec); await store.manifestSet(tid, 'tournament'); }
           }
           for (const m of await store.byTournament(tid)) {
             const have = await fbd.get('matches/' + m.id);
             if (have) { out.skipped.push({ match: m.id, reason: 'already in Firebase' }); continue; }
             out.matches.push({ id: m.id, tournament: tid, events: (m.events || []).length });
-            if (!dry) await fbd.put('matches/' + m.id, { config: m.config, events: m.events || [], rev: m.rev || 0, created: m.created || m.updated || new Date().toISOString(), updated: m.updated || new Date().toISOString() });
+            if (!dry) { await fbd.put('matches/' + m.id, { config: m.config, events: m.events || [], rev: m.rev || 0, created: m.created || m.updated || new Date().toISOString(), updated: m.updated || new Date().toISOString() }); await store.manifestSet(m.id, 'match'); }
           }
         } catch (e) { out.errors.push({ tournament: tid, error: String((e && e.message) || e).slice(0, 200) }); }
       }
       return send(res, 200, out);
+    }
+    if (p === '/api/admin/firebase-reconcile' && req.method === 'POST') {
+      // Rollback/convergence machinery: converge the Postgres recovery replica to the
+      // canonical Firebase state (and lift degraded creates into Firebase). Dry run by
+      // default; {apply:true} executes. Every repair write snapshots the previous replica
+      // into cricket_replica_snapshots first (append-only). Never deletes anything.
+      const body = await readBody(req, 2000);
+      return send(res, 200, await store.reconcileFromFirebase(!body || body.apply !== true));
     }
     if (p === '/api/admin/delete-match' && req.method === 'POST') {
       const body=await readBody(req,5e6),m=body&&body.expected;
@@ -763,11 +923,15 @@ async function handle(req, res) {
     const body = await readBody(req);
     const c = cleanTeamReg(body);
     if (c.error) return send(res, 400, { error: c.error });
-    const teams = cleanStoredTeams(t.teams);
-    if (teams.length >= MAX_TEAMS_PER_TOURNAMENT) return send(res, 507, { error: 'This tournament has reached its team limit.' });
-    if (teams.some((x) => x.name.toLowerCase() === c.name.toLowerCase())) return send(res, 409, { error: 'A team with this name is already registered.' });
-    teams.push({ id: rnd(8).toLowerCase(), name: c.name, players: c.players, status: 'pending', submittedAt: new Date().toISOString() });
-    await store.tsetTeams(t.id, teams);
+    let full = false, dupe = false;
+    const okm = await store.tmutateTeams(t.id, (teams) => {
+      if (teams.length >= MAX_TEAMS_PER_TOURNAMENT) { full = true; return null; }
+      if (teams.some((x) => x.name.toLowerCase() === c.name.toLowerCase())) { dupe = true; return null; }
+      return teams.concat([{ id: rnd(8).toLowerCase(), name: c.name, players: c.players, status: 'pending', submittedAt: new Date().toISOString() }]);
+    });
+    if (full) return send(res, 507, { error: 'This tournament has reached its team limit.' });
+    if (dupe) return send(res, 409, { error: 'A team with this name is already registered.' });
+    if (!okm) return send(res, 409, { error: 'Tournament changed on another device. Try again.' });
     return send(res, 201, { ok: true });
   }
   if ((mt = p.match(/^\/api\/tournaments\/([a-z0-9]{6,12})\/teams\/([a-z0-9]{6,12})$/)) && req.method === 'POST') {
@@ -777,20 +941,27 @@ async function handle(req, res) {
     if (!t) return send(res, 404, { error: 'Tournament not found' });
     if (!keyEq(req.headers['x-org-key'], t.keyHash)) { noteBad(ip); return send(res, 403, { error: 'Only the tournament organiser can review teams.' }); }
     const body = await readBody(req, 2e3);
-    const teams = cleanStoredTeams(t.teams);
-    const ix = teams.findIndex((x) => x.id === mt[2]);
-    if (ix === -1) return send(res, 404, { error: 'Team not found' });
-    if (body && body.action === 'approve') teams[ix].status = 'approved';
-    else if (body && body.action === 'remove') teams.splice(ix, 1);
-    else if (body && body.action === 'role') {
-      const pix = typeof body.player === 'number' && Number.isInteger(body.player) ? body.player : -1;
-      const role = body.role === 'c' || body.role === 'vc' ? body.role : '';
-      if (pix < 0 || pix >= teams[ix].players.length) return send(res, 400, { error: 'Unknown player' });
-      if (role) teams[ix].players.forEach((pl, i2) => { if (i2 !== pix && pl.role === role) pl.role = ''; });
-      teams[ix].players[pix].role = role;
-    }
-    else return send(res, 400, { error: 'Unknown action' });
-    await store.tsetTeams(t.id, teams);
+    let notFound = false, badAction = false, badPlayer = false;
+    const okm = await store.tmutateTeams(t.id, (teams) => {
+      const ix = teams.findIndex((x) => x.id === mt[2]);
+      if (ix === -1) { notFound = true; return null; }
+      const next = teams.map((x) => Object.assign({}, x, { players: (x.players || []).map((pl) => Object.assign({}, pl)) }));
+      if (body && body.action === 'approve') next[ix].status = 'approved';
+      else if (body && body.action === 'remove') next.splice(ix, 1);
+      else if (body && body.action === 'role') {
+        const pix = typeof body.player === 'number' && Number.isInteger(body.player) ? body.player : -1;
+        const role = body.role === 'c' || body.role === 'vc' ? body.role : '';
+        if (pix < 0 || pix >= next[ix].players.length) { badPlayer = true; return null; }
+        if (role) next[ix].players.forEach((pl, i2) => { if (i2 !== pix && pl.role === role) pl.role = ''; });
+        next[ix].players[pix].role = role;
+      }
+      else { badAction = true; return null; }
+      return next;
+    });
+    if (notFound) return send(res, 404, { error: 'Team not found' });
+    if (badPlayer) return send(res, 400, { error: 'Unknown player' });
+    if (badAction) return send(res, 400, { error: 'Unknown action' });
+    if (!okm) return send(res, 409, { error: 'Tournament changed on another device. Try again.' });
     return send(res, 200, { ok: true });
   }
   if ((mt = p.match(/^\/api\/matches\/([a-z0-9]{6,12})\/attach$/)) && req.method === 'POST') {

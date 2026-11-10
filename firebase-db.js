@@ -121,8 +121,32 @@ module.exports = {
   async put(path, data, ifMatchEtag) {
     return request('PUT', path, data, ifMatchEtag ? { ifMatch: ifMatchEtag } : undefined);
   },
-  // PATCH (shallow merge of the given children).
-  async patch(path, data) { return request('PATCH', path, data); },
+  // PATCH (shallow merge of the given children) with optional If-Match ETag.
+  async patch(path, data, ifMatchEtag) {
+    return request('PATCH', path, data, ifMatchEtag ? { ifMatch: ifMatchEtag } : undefined);
+  },
+  // Bounded server-side filtered read: orderBy a child/value with equality.
+  // Callers MUST re-filter results client-side (emulators/mocks may ignore the filter).
+  async query(path, orderByChild, equalToValue) {
+    const t = await getToken();
+    let url = dbUrl() + '/' + ROOT + '/' + path + '.json?auth=' + encodeURIComponent(t)
+      + '&orderBy=' + encodeURIComponent(JSON.stringify(orderByChild))
+      + '&equalTo=' + encodeURIComponent(JSON.stringify(equalToValue));
+    if (process.env.FB_NS) url += '&ns=' + encodeURIComponent(process.env.FB_NS);
+    const r = await fetch(url, { signal: AbortSignal.timeout(15000) });
+    if (r.status === 401 || r.status === 403) { idToken = null; const t2 = await getToken(); return this.query(path, orderByChild, equalToValue); }
+    if (!r.ok) { const err = new Error('Firebase query ' + path + ' -> ' + r.status); err.status = r.status; throw err; }
+    return r.json();
+  },
+  // Shallow listing (keys/true values only) for bounded counts and id sets.
+  async getShallow(path) {
+    const t = await getToken();
+    let url = dbUrl() + '/' + ROOT + '/' + path + '.json?auth=' + encodeURIComponent(t) + '&shallow=true';
+    if (process.env.FB_NS) url += '&ns=' + encodeURIComponent(process.env.FB_NS);
+    const r = await fetch(url, { signal: AbortSignal.timeout(15000) });
+    if (!r.ok) { const err = new Error('Firebase shallow ' + path + ' -> ' + r.status); err.status = r.status; throw err; }
+    return r.json();
+  },
   // DELETE a subtree. Used only by the app's existing admin delete flows.
   async del(path) { return request('DELETE', path); },
   // Health probe: true when auth + read succeed.
