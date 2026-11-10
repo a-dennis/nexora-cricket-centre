@@ -225,15 +225,21 @@ function makeFirebaseStore(pg) {
     return { path: matchPath(homes[0] || '', id), pgRow };
   }
   async function fbMatchIds() {
-    const ids = [];
+    return (await fbMatchLocations()).map((x) => x.id);
+  }
+  // Canonical delete/enumerate paths come from the nested layout itself, never from
+  // the Postgres replica: under a Postgres outage/wipe the replica cannot name the
+  // parent, and a guessed parent would silently miss the real record.
+  async function fbMatchLocations() {
+    const out = [];
     const prac = await fbd.getShallow('practice');
-    if (prac && typeof prac === 'object') ids.push(...Object.keys(prac));
+    if (prac && typeof prac === 'object') for (const id of Object.keys(prac)) out.push({ id, path: 'practice/' + id });
     const tours = await fbd.getShallow('tournaments');
     for (const tid of tours && typeof tours === 'object' ? Object.keys(tours) : []) {
       const ms = await fbd.getShallow('tournaments/' + tid + '/matches');
-      if (ms && typeof ms === 'object') ids.push(...Object.keys(ms));
+      if (ms && typeof ms === 'object') for (const id of Object.keys(ms)) out.push({ id, path: 'tournaments/' + tid + '/matches/' + id });
     }
-    return ids;
+    return out;
   }
   const canonicalMissing = (kind, id) => { const e = new Error('Canonical Firebase record missing for ' + kind + ' ' + id); e.status = 500; e.canonical = true; return e; };
   async function matchKeyHash(id, legacyRow) {
@@ -464,7 +470,7 @@ function makeFirebaseStore(pg) {
       const all = await allMatchesMerged();
       if (matchSnapshot(all) !== matchSnapshot(expected)) return false;
       await pg.snapshotSave('matches:all', all); // version preserved before the owner-authorised replace
-      for (const id of await fbMatchIds()) { const r = await pg.get(id); await fbd.del(matchPath(tidOf(r && r.config), id)); await pg.matchKeyDel(id); await pg.manifestDel(id); }
+      for (const loc of await fbMatchLocations()) { await fbd.del(loc.path); await pg.matchKeyDel(loc.id); await pg.manifestDel(loc.id); }
       await pg.deleteAllMatchRows();
       await fbd.put(matchPath(tidOf(fresh.config), fresh.id), fbMatchRec(fresh.config, [], 0, iso(), iso()));
       await pg.matchKeySet(fresh.id, fresh.keyHash);
