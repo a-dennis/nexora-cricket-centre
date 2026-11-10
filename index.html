@@ -1536,7 +1536,21 @@ function openExtrasPlus(){
   
 var ceremonyViewerBase=viewPane;
   
-viewPane=function(){return '<a class="btn pri" href="/m/49asxecn" id="ceremonymatch" style="display:block;text-align:center;text-decoration:none;margin-bottom:14px">Today\'s ceremonial match</a><div class="mut" style="margin-bottom:16px">Malnad Divas v Sahyadri ICONS · 7 Nov 2026</div>'+ceremonyViewerBase()};/* ---------- boot ---------- */
+viewPane=function(){return '<a class="btn pri" href="/m/49asxecn" id="ceremonymatch" style="display:block;text-align:center;text-decoration:none;margin-bottom:14px">Today\'s ceremonial match</a><div class="mut" style="margin-bottom:16px">Malnad Divas v Sahyadri ICONS · 7 Nov 2026</div>'+ceremonyViewerBase()};/* Live updates: when the online copy in Firebase changes, refresh this page's data. Invisible; if the SDK or network fails, the existing timers stay the fallback. */
+var fbApp=null,fbReady=null;
+function fbLive(path,onChange){
+  try{
+    if(!fbReady)fbReady=new Promise(function(res){
+      var s=document.createElement('script');s.src='https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js';s.integrity='sha384-AQ3POAMqIhwS81FrUH95ekxqBZHeP5tG2JfEL3+7GuTtfRLWnrRh32UxwzM+//A9';s.crossOrigin='anonymous';
+      s.onload=function(){var s2=document.createElement('script');s2.src='https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js';s2.integrity='sha384-1/m+A1jVWbD3yiK3/vtFvm1+LjK1WLpSoDY+Kaxppwn/yP9BVSgdHTNQVOjrzUO5';s2.crossOrigin='anonymous';
+        s2.onload=function(){try{fbApp=firebase.initializeApp({apiKey:'AIzaSyBAKELv9icd9r1nWOE6T0zct1wIJHJVy-A',databaseURL:'https://cricket-b12ab-default-rtdb.asia-southeast1.firebasedatabase.app'});res(true)}catch(e){res(false)}};
+        s2.onerror=function(){res(false)};document.head.appendChild(s2)};
+      s.onerror=function(){res(false)};document.head.appendChild(s);
+    });
+    fbReady.then(function(ok){if(!ok)return;var first=true,tmr=null;fbApp.database().ref('nexoraCentre/'+path).on('value',function(){if(first){first=false;return}clearTimeout(tmr);tmr=setTimeout(function(){try{onChange()}catch(e){}},400)},function(){})}).catch(function(){});
+  }catch(e){}
+}
+/* ---------- boot ---------- */
 if(mode==='launch')launchPage();
 else if(mode==='home')home();
 else if(mode==='t'&&new URLSearchParams(location.search).get('roster')==='1'){rosterPage()}
@@ -1544,6 +1558,7 @@ else if(mode==='t'){
   var om=location.hash.match(/o=([A-Za-z0-9]+)/);
   if(om){history.replaceState(null,'',location.pathname);fetch('/api/tournaments/'+id).then(function(r){return r.json()}).then(function(j){if(j&&j.name){tSave({id:id,name:j.name,key:om[1]});renderT()}})}
   renderT();loadT(true);setInterval(loadT,15000);
+  fbLive('tournaments/'+id,function(){loadT()});
   document.addEventListener('visibilitychange',function(){if(!document.hidden)loadT()});
 }
 else if(mode==='r'){regPage()}
@@ -1553,6 +1568,7 @@ else{
     try{if(m){localStorage.setItem('ck_'+id,m[1]);history.replaceState(null,'',location.pathname)}key=localStorage.getItem('ck_'+id)}catch(e){key=m?m[1]:null}
   }
   render();load(true);
+  fbLive('matches/'+id,function(){load()});
   if(mode==='s'&&id==='49asxecn'&&!key){var so=tList().filter(function(t){return t.id==='whxrz4tw'})[0];if(so&&orgSess())fetch('/api/matches/'+id+'/scoring-access',{headers:{'x-org-key':so.key,'x-org-session':orgSess()}}).then(function(r){return r.json().then(function(j){return r.ok&&j.ok})}).then(function(ok){if(ok){orgScoring=true;render()}}).catch(function(){});}
   setInterval(load,3000);setInterval(tickLabel,1000);
   document.addEventListener('visibilitychange',function(){if(!document.hidden)load()});

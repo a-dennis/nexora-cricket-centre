@@ -11,8 +11,7 @@ const MAX_MATCHES = 300;
 const CREATE_LIMIT = 15; // per IP per hour
 
 // ---------- storage ----------
-function makeStore() {
-  if (process.env.DATABASE_URL) {
+function makePgStore() {
     const { Pool } = require('pg');
     const pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: process.env.PGSSL === 'off' ? false : { rejectUnauthorized: false }, max: 4 });
     const ready = pool.query(`CREATE TABLE IF NOT EXISTS cricket_matches (
@@ -21,9 +20,20 @@ function makeStore() {
     const tready = pool.query(`CREATE TABLE IF NOT EXISTS cricket_tournaments (
       id TEXT PRIMARY KEY, name TEXT NOT NULL, key_hash TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now())`).then(() => pool.query("ALTER TABLE cricket_tournaments ADD COLUMN IF NOT EXISTS teams JSONB NOT NULL DEFAULT '[]', ADD COLUMN IF NOT EXISTS reg_key_hash TEXT, ADD COLUMN IF NOT EXISTS listed BOOLEAN NOT NULL DEFAULT false"));
     const sready = pool.query('CREATE TABLE IF NOT EXISTS cricket_settings (k TEXT PRIMARY KEY, v TEXT)');
+    const kready = pool.query('CREATE TABLE IF NOT EXISTS cricket_match_keys (id TEXT PRIMARY KEY, key_hash TEXT NOT NULL)');
+    const pready = pool.query("CREATE TABLE IF NOT EXISTS cricket_team_pii (tid TEXT NOT NULL, team_id TEXT NOT NULL, players JSONB NOT NULL DEFAULT '{}', PRIMARY KEY (tid, team_id))");
     const row = (r) => r && { id: r.id, config: r.config, events: r.events, keyHash: r.key_hash, rev: r.rev, updated: r.updated_at };
     return {
       kind: 'durable',
+      async matchKeySet(id, keyHash) { await kready; await pool.query('INSERT INTO cricket_match_keys(id,key_hash) VALUES($1,$2) ON CONFLICT (id) DO UPDATE SET key_hash=$2', [id, keyHash]); },
+      async matchKeyGet(id) { await kready; const r = await pool.query('SELECT key_hash FROM cricket_match_keys WHERE id=$1', [id]); return r.rows[0] ? r.rows[0].key_hash : null; },
+      async matchKeyDel(id) { await kready; await pool.query('DELETE FROM cricket_match_keys WHERE id=$1', [id]); },
+      async matchIds() { await ready; const r = await pool.query('SELECT id FROM cricket_matches'); return r.rows.map((x) => x.id); },
+      async deleteMatchRow(id) { await ready; await pool.query('DELETE FROM cricket_matches WHERE id=$1', [id]); },
+      async deleteAllMatchRows() { await ready; await pool.query('DELETE FROM cricket_matches'); },
+      async teamPiiSet(tid, teamId, players) { await pready; await pool.query('INSERT INTO cricket_team_pii(tid,team_id,players) VALUES($1,$2,$3) ON CONFLICT (tid,team_id) DO UPDATE SET players=$3', [tid, teamId, JSON.stringify(players)]); },
+      async teamPiiGet(tid) { await pready; const r = await pool.query('SELECT team_id, players FROM cricket_team_pii WHERE tid=$1', [tid]); const out = {}; for (const x of r.rows) out[x.team_id] = x.players || {}; return out; },
+      async teamPiiPrune(tid, keepTeamIds) { await pready; await pool.query('DELETE FROM cricket_team_pii WHERE tid=$1 AND NOT (team_id = ANY($2))', [tid, keepTeamIds && keepTeamIds.length ? keepTeamIds : ['__none__']]); },
       async replaceAllMatches(expected, fresh) {
         await ready; const c = await pool.connect();
         try {
@@ -72,8 +82,9 @@ function makeStore() {
         return r.rowCount === 1;
       },
     };
-  }
-  // Temporary fallback (file in /tmp): survives restarts of the process, not redeploys.
+}
+// Temporary fallback (file in /tmp): survives restarts of the process, not redeploys.
+function makeFileStore() {
   const file = process.env.STORE_FILE || path.join(require('os').tmpdir(), 'cricket-matches.json');
   let db = {};
   try { db = JSON.parse(fs.readFileSync(file, 'utf8')); } catch (e) { db = {}; }
@@ -117,6 +128,208 @@ function makeStore() {
     async importMatch(m) { if (db[m.id]) return false; db[m.id] = { id: m.id, config: m.config, events: m.events, keyHash: m.keyHash, rev: m.rev, updated: m.updated }; save(); return true; },
     async importTournament(t) { if (tdb[t.id]) return false; tdb[t.id] = { id: t.id, name: t.name, keyHash: t.keyHash, teams: Array.isArray(t.teams) ? t.teams : [], regKeyHash: t.regKeyHash || null, listed: t.listed === true }; tsave(); return true; },
     async update(id, events, expectRev) { const m = db[id]; if (!m || m.rev !== expectRev) return false; m.events = events; m.rev++; m.updated = new Date().toISOString(); save(); return true; },
+  };
+}
+function makeStore() {
+  const pg = process.env.DATABASE_URL ? makePgStore() : null;
+  if (pg && process.env.FIREBASE_USER_EMAIL && process.env.FIREBASE_USER_PASSWORD) return makeFirebaseStore(pg);
+  return pg || makeFileStore();
+}
+// Firebase-primary store: public app data (tournament records, approved rosters,
+// matches and scores) lives in RTDB under nexoraCentre/ and nowhere else.
+// Private auth fields (key hashes, sessions, organiser password), pending teams
+// and employee details stay in Postgres. Postgres-only rows are legacy data
+// served by private link and are never pushed to the public path.
+function makeFirebaseStore(pg) {
+  const fbd = require('./firebase-db');
+  const iso = () => new Date().toISOString();
+  const fbMatchRec = (config, events, rev, created, updated) => ({ config, events, rev, created: created || iso(), updated: updated || iso() });
+  const piiMapOf = (t) => { const m = {}; for (const p of (t.players || [])) { if (p && p.name) m[String(p.name).toLowerCase()] = { empId: p.empId || '', dept: p.dept || '' }; } return m; };
+  const publicTeam = (t, includePii) => ({
+    id: t.id, name: t.name, submittedAt: t.submittedAt,
+    players: (t.players || []).map((p) => includePii
+      ? { name: p.name, empId: p.empId || '', dept: p.dept || '', role: p.role || '' }
+      : { name: p.name, role: p.role || '' }),
+  });
+  async function fbTournament(id) { const t = await fbd.get('tournaments/' + id); return t && typeof t === 'object' ? t : null; }
+  async function fbMatchIds() { const m = await fbd.get('matches'); return m && typeof m === 'object' ? Object.keys(m) : []; }
+  async function matchKeyHash(id, legacyRow) {
+    let keyHash = await pg.matchKeyGet(id);
+    if (!keyHash) { const legacy = legacyRow !== undefined ? legacyRow : await pg.get(id); keyHash = (legacy && legacy.keyHash) || ''; }
+    return keyHash;
+  }
+  async function tgetMerged(id) {
+    const fb = await fbTournament(id);
+    const legacy = await pg.tget(id);
+    if (!fb && !legacy) return null;
+    if (!fb) return legacy;
+    const includePii = id === PUBLIC_DETAIL_TOURNAMENT;
+    const pii = includePii ? {} : await pg.teamPiiGet(id);
+    const pending = legacy && Array.isArray(legacy.teams) ? legacy.teams.filter((t) => t.status !== 'approved') : [];
+    const approved = (Array.isArray(fb.teams) ? fb.teams : []).map((t) => ({
+      id: t.id, name: t.name, submittedAt: t.submittedAt, status: 'approved',
+      players: (Array.isArray(t.players) ? t.players : []).map((p) => {
+        const priv = (pii[t.id] || {})[String(p.name || '').toLowerCase()] || {};
+        return { name: p.name, empId: includePii ? (p.empId || '') : (priv.empId || ''), dept: includePii ? (p.dept || '') : (priv.dept || ''), role: p.role || '' };
+      }),
+    }));
+    return {
+      id,
+      name: fb.name,
+      keyHash: (legacy && legacy.keyHash) || '',
+      teams: approved.concat(pending),
+      regKeyHash: legacy ? legacy.regKeyHash || null : null,
+      listed: !!fb.listed,
+      created: fb.created || (legacy && legacy.created),
+    };
+  }
+  async function allMatchesMerged() {
+    const fbAll = await fbd.get('matches');
+    const fbIds = fbAll && typeof fbAll === 'object' ? Object.keys(fbAll) : [];
+    const out = [];
+    for (const id of fbIds) {
+      const r = fbAll[id];
+      out.push({ id, config: r.config, events: Array.isArray(r.events) ? r.events : [], keyHash: await matchKeyHash(id), rev: r.rev || 0, updated: r.updated, created: r.created });
+    }
+    for (const m of await pg.allMatches()) if (!fbIds.includes(m.id)) out.push(m);
+    return out;
+  }
+  return {
+    kind: 'durable',
+    getSetting: (k) => pg.getSetting(k),
+    setSetting: (k, v) => pg.setSetting(k, v),
+    async get(id) {
+      const fb = await fbd.get('matches/' + id);
+      if (fb && typeof fb === 'object') return { id, config: fb.config, events: Array.isArray(fb.events) ? fb.events : [], keyHash: await matchKeyHash(id), rev: fb.rev || 0, updated: fb.updated, created: fb.created };
+      return pg.get(id);
+    },
+    async count() { const fb = await fbMatchIds(); const legacy = (await pg.matchIds()).filter((x) => !fb.includes(x)); return fb.length + legacy.length; },
+    async create(m) {
+      await fbd.put('matches/' + m.id, fbMatchRec(m.config, [], 0, iso(), iso()));
+      await pg.matchKeySet(m.id, m.keyHash);
+    },
+    async update(id, events, expectRev) {
+      const g = await fbd.get('matches/' + id, true);
+      if (!g.data || typeof g.data !== 'object') return pg.update(id, events, expectRev);
+      if ((g.data.rev || 0) !== expectRev) return false;
+      const next = Object.assign({}, g.data, { events, rev: expectRev + 1, updated: iso() });
+      try { await fbd.put('matches/' + id, next, g.etag || undefined); return true; }
+      catch (e) { if (e.status === 412) return false; throw e; }
+    },
+    async setConfig(id, config, bump) {
+      const g = await fbd.get('matches/' + id, true);
+      if (!g.data || typeof g.data !== 'object') return pg.setConfig(id, config, bump);
+      const attempt = (cur, etag) => {
+        const next = Object.assign({}, cur, { config });
+        if (bump) { next.rev = (cur.rev || 0) + 1; next.updated = iso(); }
+        return fbd.put('matches/' + id, next, etag || undefined);
+      };
+      try { await attempt(g.data, g.etag); }
+      catch (e) {
+        if (e.status !== 412) throw e;
+        const g2 = await fbd.get('matches/' + id, true);
+        if (!g2.data || typeof g2.data !== 'object') throw e;
+        await attempt(g2.data, g2.etag); // a second conflict surfaces as an error
+      }
+    },
+    async byTournament(tid) {
+      const fbAll = await fbd.get('matches');
+      const fbIds = fbAll && typeof fbAll === 'object' ? Object.keys(fbAll) : [];
+      const out = [];
+      for (const id of fbIds) {
+        const r = fbAll[id];
+        if (r && r.config && r.config.tid === tid) out.push({ id, config: r.config, events: Array.isArray(r.events) ? r.events : [], keyHash: await matchKeyHash(id), rev: r.rev || 0, updated: r.updated, created: r.created });
+      }
+      for (const m of await pg.byTournament(tid)) if (!fbIds.includes(m.id)) out.push(m);
+      return out;
+    },
+    async allMatches() { return allMatchesMerged(); },
+    async importMatch(m) {
+      const existing = await fbd.get('matches/' + m.id);
+      if (existing) return false;
+      return pg.importMatch(m); // restored legacy data stays private-link only
+    },
+    async deleteBackedUpMatch(expected) {
+      const g = await fbd.get('matches/' + expected.id);
+      if (!g || typeof g !== 'object') return pg.deleteBackedUpMatch(expected);
+      const legacy = await pg.get(expected.id);
+      const keyHash = await matchKeyHash(expected.id, legacy);
+      const cur = { id: expected.id, config: g.config, events: Array.isArray(g.events) ? g.events : [], keyHash, rev: g.rev || 0 };
+      if (matchSnapshot([cur]) !== matchSnapshot([expected])) return false;
+      await fbd.del('matches/' + expected.id);
+      await pg.matchKeyDel(expected.id);
+      if (legacy) await pg.deleteMatchRow(expected.id); // drop the stale migrated copy
+      return true;
+    },
+    async replaceAllMatches(expected, fresh) {
+      const all = await allMatchesMerged();
+      if (matchSnapshot(all) !== matchSnapshot(expected)) return false;
+      for (const id of await fbMatchIds()) { await fbd.del('matches/' + id); await pg.matchKeyDel(id); }
+      await pg.deleteAllMatchRows();
+      await fbd.put('matches/' + fresh.id, fbMatchRec(fresh.config, [], 0, iso(), iso()));
+      await pg.matchKeySet(fresh.id, fresh.keyHash);
+      return true;
+    },
+    async tcreate(t) {
+      await fbd.put('tournaments/' + t.id, { name: t.name, listed: false, created: iso(), registration: false, teams: [] });
+      await pg.tcreate(t); // holds keyHash and the private remainder
+    },
+    async tget(id) { return tgetMerged(id); },
+    async tsetTeams(id, teams) {
+      const fb = await fbTournament(id);
+      if (!fb) return pg.tsetTeams(id, teams); // legacy link-private tournament: never enters the public path
+      const includePii = id === PUBLIC_DETAIL_TOURNAMENT;
+      const approved = (teams || []).filter((t) => t.status === 'approved');
+      const pending = (teams || []).filter((t) => t.status !== 'approved');
+      await fbd.put('tournaments/' + id, Object.assign({}, fb, { teams: approved.map((t) => publicTeam(t, includePii)) }));
+      await pg.tsetTeams(id, pending);
+      if (!includePii) {
+        for (const t of approved) await pg.teamPiiSet(id, t.id, piiMapOf(t));
+        await pg.teamPiiPrune(id, approved.map((t) => t.id));
+      }
+    },
+    async tsetReg(id, regKeyHash) {
+      const fb = await fbTournament(id);
+      if (fb) await fbd.patch('tournaments/' + id, { registration: !!regKeyHash });
+      await pg.tsetReg(id, regKeyHash);
+    },
+    async tsetListed(id, listed) {
+      const fb = await fbTournament(id);
+      if (fb) await fbd.patch('tournaments/' + id, { listed: !!listed });
+      return pg.tsetListed(id, listed);
+    },
+    async trename(id, name) {
+      const fb = await fbTournament(id);
+      if (fb) { await fbd.patch('tournaments/' + id, { name }); await pg.trename(id, name); return true; }
+      return pg.trename(id, name);
+    },
+    async tcount() {
+      const all = await fbd.get('tournaments');
+      const fbIds = all && typeof all === 'object' ? Object.keys(all) : [];
+      const legacy = await pg.allTournaments();
+      return fbIds.length + legacy.filter((t) => !fbIds.includes(t.id)).length;
+    },
+    async listedTournaments() {
+      const all = await fbd.get('tournaments');
+      const out = [];
+      const fbIds = [];
+      if (all && typeof all === 'object') for (const id of Object.keys(all)) { fbIds.push(id); if (all[id] && all[id].listed) out.push({ id, name: all[id].name }); }
+      for (const t of await pg.listedTournaments()) if (!fbIds.includes(t.id)) out.push(t);
+      return out;
+    },
+    async allTournaments() {
+      const all = await fbd.get('tournaments');
+      const fbIds = all && typeof all === 'object' ? Object.keys(all) : [];
+      const out = [];
+      for (const id of fbIds) { const t = await tgetMerged(id); if (t) out.push(t); }
+      for (const t of await pg.allTournaments()) if (!fbIds.includes(t.id)) out.push(t);
+      return out;
+    },
+    async importTournament(t) {
+      const existing = await fbTournament(t.id);
+      if (existing) return false;
+      return pg.importTournament(t); // restored legacy data stays private-link only
+    },
   };
 }
 function stableValue(x) { if (Array.isArray(x)) return x.map(stableValue); if(x && typeof x==='object') return Object.keys(x).sort().reduce((a,k)=>(a[k]=stableValue(x[k]),a),{}); return x; }
@@ -338,7 +551,7 @@ async function handle(req, res) {
     return send(res, 200, { ok: true });
   }
   let mt;
-  if (p === '/api/admin/delete-match' || p === '/api/backup' || p === '/api/restore' || p === '/api/admin/tournament-name' || p === '/api/admin/tournament-listed' || p === '/api/admin/replace-matches') {
+  if (p === '/api/admin/delete-match' || p === '/api/backup' || p === '/api/restore' || p === '/api/admin/tournament-name' || p === '/api/admin/tournament-listed' || p === '/api/admin/replace-matches' || p === '/api/admin/firebase-migrate') {
     // Owner-only. Disabled unless BACKUP_TOKEN is set. Backups contain match data and hashed keys, never raw keys.
     const tok = process.env.BACKUP_TOKEN;
     if (!tok || tok.length < 24) return send(res, 404, { error: 'Unknown API' });
@@ -349,6 +562,47 @@ async function handle(req, res) {
       const [ms, ts] = [await store.allMatches(), await store.allTournaments()];
       return send(res, 200, { format: 'cricket-backup', version: 1, exportedAt: new Date().toISOString(), storage: store.kind,
         counts: { matches: ms.length, tournaments: ts.length }, tournaments: ts, matches: ms });
+    }
+    if (p === '/api/admin/firebase-migrate' && req.method === 'POST') {
+      // One-time INSERT-only copy of the two public tournaments and their matches into
+      // nexoraCentre/. Never overwrites an existing Firebase record, never deletes anything.
+      // Default is a dry run that only reports what would be copied; {apply:true} executes.
+      // {seedBindings:true} also saves organiser access for these tournaments - only ever
+      // sent after the owner explicitly confirms the binding for that tournament.
+      const body = await readBody(req, 2000);
+      const dry = !body || body.apply !== true;
+      const fbd = require('./firebase-db');
+      const out = { dryRun: dry, tournaments: [], matches: [], skipped: [], errors: [] };
+      for (const tid of ['whxrz4tw', 'hovxdntl']) {
+        try {
+          const t = await store.tget(tid);
+          if (!t) { out.skipped.push({ tournament: tid, reason: 'missing' }); continue; }
+          const existing = await fbd.get('tournaments/' + tid);
+          if (existing) { out.skipped.push({ tournament: tid, reason: 'already in Firebase' }); }
+          else {
+            const includePii = tid === PUBLIC_DETAIL_TOURNAMENT;
+            const approved = cleanStoredTeams(t.teams).filter((x) => x.status === 'approved');
+            const rec = { name: t.name, listed: !!t.listed, created: t.created || new Date().toISOString(), registration: !!t.regKeyHash,
+              teams: approved.map((tm) => ({ id: tm.id, name: tm.name, submittedAt: tm.submittedAt,
+                players: tm.players.map((p) => includePii ? { name: p.name, empId: p.empId || '', dept: p.dept || '', role: p.role || '' } : { name: p.name, role: p.role || '' }) })) };
+            out.tournaments.push({ id: tid, name: t.name, approvedTeams: approved.length });
+            if (!dry) {
+              await fbd.put('tournaments/' + tid, rec);
+              // With the Firebase record in place, the hybrid store re-splits: approved rosters
+              // (public fields) to Firebase, pending teams and employee details stay in Postgres.
+              await store.tsetTeams(tid, cleanStoredTeams(t.teams));
+              if (body.seedBindings === true) await store.setSetting('orgtour_' + tid, t.keyHash);
+            }
+          }
+          for (const m of await store.byTournament(tid)) {
+            const have = await fbd.get('matches/' + m.id);
+            if (have) { out.skipped.push({ match: m.id, reason: 'already in Firebase' }); continue; }
+            out.matches.push({ id: m.id, tournament: tid, events: (m.events || []).length });
+            if (!dry) await fbd.put('matches/' + m.id, { config: m.config, events: m.events || [], rev: m.rev || 0, created: m.created || m.updated || new Date().toISOString(), updated: m.updated || new Date().toISOString() });
+          }
+        } catch (e) { out.errors.push({ tournament: tid, error: String((e && e.message) || e).slice(0, 200) }); }
+      }
+      return send(res, 200, out);
     }
     if (p === '/api/admin/delete-match' && req.method === 'POST') {
       const body=await readBody(req,5e6),m=body&&body.expected;
