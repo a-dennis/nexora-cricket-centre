@@ -908,6 +908,18 @@ async function canScore(req, m) {
   return organiserOwnsMatch(req, m);
 }
 
+// Organiser-session scoring (ball-by-ball, video via his signed-in session) is an
+// organiser action: a legacy (pre-policy) password blocks it until reset, exactly
+// like the console routes. An APPROVED scorer device is the ground person's
+// independent grant and is never blocked by the organiser password state. Auth
+// failure keeps its own 403; only a valid organiser session gets the reset signal.
+async function scoreResetBlocked(req, res, m) {
+  if (keyEq(req.headers['x-scorer-key'], m.keyHash) &&
+      (await scorerDeviceGrant(m.id, req.headers['x-scorer-device'])) === 'approved') return false;
+  if (!(await organiserOwnsMatch(req, m))) return false;
+  return orgResetBlocked(res);
+}
+
 // Match days are plain YYYY-MM-DD strings chosen by the user, never converted between timezones.
 function cleanDate(d) {
   if (typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d)) {
@@ -1505,6 +1517,7 @@ async function handle(req, res) {
     const m = await store.get(mt[1]);
     if (!m) return send(res, 404, { error: 'Match not found' });
     if (!(await canScore(req,m))) return send(res, 403, { error: 'Use this match\'s scorer link or verified organiser access to set the live video.' });
+    if (await scoreResetBlocked(req, res, m)) return;
     const body = await readBody(req);
     const source = body.source || 'youtube';
     if (!['youtube','ninja'].includes(source)) return send(res, 400, {error:'Choose YouTube or VDO.Ninja.'});
@@ -1577,6 +1590,7 @@ async function handle(req, res) {
     const m = await store.get(mt[1]);
     if (!m) return send(res, 404, { error: 'Match not found' });
     if (!(await canScore(req,m))) return send(res, 403, { error: 'This device cannot score. Use the scorer link or verified organiser access.' });
+    if (await scoreResetBlocked(req, res, m)) return;
     const body = await readBody(req);
     if (body.rev !== undefined && body.rev !== m.rev) return send(res, 409, { error: 'Match changed on another device. Refreshed.', match: publicView(m) });
     let events = m.events.slice();
