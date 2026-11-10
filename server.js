@@ -819,6 +819,15 @@ async function orgAuthed(req, t) {
 // working with the current password or an existing session - never a hard lockout.
 async function orgpassRec() { let ph = null; try { ph = JSON.parse((await store.getSetting('orgpass')) || 'null'); } catch (e) { ph = null; } return ph && ph.salt && ph.hash ? ph : null; }
 async function orgpassLegacy() { const ph = await orgpassRec(); return !!(ph && ph.v !== 2); }
+// Central gate for every organiser console action: a legacy (pre-policy) password
+// blocks console actions until he sets a new one. One responder, so every route
+// returns the same reset signal; auth failures keep their own 403 below. Sign-in,
+// the password change itself and logout stay open - never a hard lockout.
+async function orgResetBlocked(res) {
+  if (!(await orgpassLegacy())) return false;
+  send(res, 409, { error: 'Set a new password (10+ characters) first.', code: 'reset_required' });
+  return true;
+}
 // Security audit trail (orgaudit_YYYY-MM-DD settings rows): times + event names + IP
 // only - never passwords, tokens, links or key material.
 // Audit calls are fire-and-forget at call sites; serialize the read-modify-write
@@ -1006,7 +1015,7 @@ async function handle(req, res) {
   }
   if (p === '/api/auth/tournaments' && (req.method === 'GET' || req.method === 'POST')) {
     if (!(await validOrgSession(req.headers['x-org-session']))) return send(res,403,{error:'Sign in as organiser first.'});
-    if (await orgpassLegacy()) return send(res,409,{error:'Set a new password (10+ characters) first.',code:'reset_required'});
+    if (await orgResetBlocked(res)) return;
     if (req.method === 'POST') {
       const ip=(req.headers['x-forwarded-for']||req.socket.remoteAddress||'').split(',')[0].trim();
       if(badAuth(ip))return send(res,429,{error:'Too many failed attempts. Try again later.'});
@@ -1253,7 +1262,7 @@ async function handle(req, res) {
     // (always the case in production), creation needs a signed-in, post-reset session.
     if (await orgpassRec()) {
       if (!(await validOrgSession(req.headers['x-org-session']))) return send(res, 403, { error: 'Sign in as organiser first.' });
-      if (await orgpassLegacy()) return send(res, 409, { error: 'Set a new password (10+ characters) first.', code: 'reset_required' });
+      if (await orgResetBlocked(res)) return;
     }
     if ((await store.tcount()) >= MAX_TOURNAMENTS) return send(res, 507, { error: 'Storage limit reached.' });
     const body = await readBody(req);
@@ -1324,6 +1333,7 @@ async function handle(req, res) {
     const m = await store.get(matchId);
     if (!m) return send(res, 404, { error: 'Match not found' });
     if (!(await organiserOwnsMatch(req, m))) return send(res, 403, { error: 'Sign in as organiser on a device holding this tournament\'s saved access.' });
+    if (await orgResetBlocked(res)) return;
     const rows = await store.listSettings('scorerdev_' + matchId + '_');
     const row = rows.find((r) => r.k.slice(-8) === claim);
     if (!row) return send(res, 404, { error: 'Claim not found' });
@@ -1349,6 +1359,7 @@ async function handle(req, res) {
     const t = await store.tget(mt[1]);
     if (!t) return send(res, 404, { error: 'Tournament not found' });
     if (!(await orgAuthed(req, t))) { noteBad(ip); return send(res, 403, { error: 'Sign in as organiser on the device holding this tournament organiser link.' }); }
+    if (await orgResetBlocked(res)) return;
     const ms = await store.byTournament(t.id);
     return send(res, 200, { format: 'cricket-backup', version: 1, exportedAt: new Date().toISOString(), storage: store.kind, counts: { matches: ms.length, tournaments: 1 }, tournaments: [{ id: t.id, name: t.name, keyHash: t.keyHash, teams: cleanStoredTeams(t.teams), regKeyHash: t.regKeyHash || null }], matches: ms.map((m) => ({ id: m.id, config: m.config, events: m.events, keyHash: m.keyHash, rev: m.rev, updated: m.updated })) });
   }
@@ -1385,6 +1396,7 @@ async function handle(req, res) {
     const t = await store.tget(mt[1]);
     if (!t) return send(res, 404, { error: 'Tournament not found' });
     if (!(await orgAuthed(req, t))) { noteBad(ip); return send(res, 403, { error: 'Sign in as organiser on the device holding this tournament organiser link.' }); }
+    if (await orgResetBlocked(res)) return;
     const body = await readBody(req, 2e3);
     const rk = String(body && body.regKey || '');
     if (!rk) { await store.tsetReg(t.id, null); return send(res, 200, { ok: true, registration: 'closed' }); }
@@ -1401,7 +1413,7 @@ async function handle(req, res) {
     const ip = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
     if (badAuth(ip)) return send(res, 429, { error: 'Too many failed attempts. Try again later.' });
     if (!(await validOrgSession(req.headers['x-org-session']))) return send(res, 403, { error: 'Sign in as organiser first.' });
-    if (await orgpassLegacy()) return send(res, 409, { error: 'Set a new password (10+ characters) first.', code: 'reset_required' });
+    if (await orgResetBlocked(res)) return;
     const t = await store.tget(mt[1]);
     if (!t) return send(res, 404, { error: 'Tournament not found' });
     const key = rnd(14);
@@ -1417,6 +1429,7 @@ async function handle(req, res) {
     const t = await store.tget(mt[1]);
     if (!t) return send(res, 404, { error: 'Tournament not found' });
     if (!(await orgAuthed(req, t))) { noteBad(ip); return send(res, 403, { error: 'Sign in as organiser on the device holding this tournament organiser link.' }); }
+    if (await orgResetBlocked(res)) return;
     const body = await readBody(req, 2e3);
     await store.tsetListed(t.id, !!(body && body.listed));
     return send(res, 200, { ok: true, listed: !!(body && body.listed) });
@@ -1448,6 +1461,7 @@ async function handle(req, res) {
     const t = await store.tget(mt[1]);
     if (!t) return send(res, 404, { error: 'Tournament not found' });
     if (!(await orgAuthed(req, t))) { noteBad(ip); return send(res, 403, { error: 'Sign in as organiser on the device holding this tournament organiser link.' }); }
+    if (await orgResetBlocked(res)) return;
     const body = await readBody(req, 2e3);
     let notFound = false, badAction = false, badPlayer = false;
     const okm = await store.tmutateTeams(t.id, (teams) => {
@@ -1480,6 +1494,7 @@ async function handle(req, res) {
     const t = await store.tget(String(body.tournament || ''));
     if (!t) return send(res, 404, { error: 'Tournament not found' });
     if (!(await orgAuthed(req, t))) return send(res, 403, { error: 'Sign in as organiser on the device holding this tournament organiser link.' });
+    if (await orgResetBlocked(res)) return;
     if (m.config.tid && m.config.tid !== t.id) return send(res, 409, { error: 'This match already belongs to a tournament.' });
     if (!m.config.tid && (await store.byTournament(t.id)).length >= MAX_PER_TOURNAMENT) return send(res, 507, { error: 'Tournament is full.' });
     const config = Object.assign({}, m.config, { tid: t.id, date: cleanDate(body.date || m.config.date) });
@@ -1526,6 +1541,7 @@ async function handle(req, res) {
       catch (e) { if (e && e.canonical) throw e; return send(res, 503, { error: 'The live store is unreachable right now, so tournament matches cannot be created. Try again shortly.' }); }
       if (!t) return send(res, 404, { error: 'Tournament not found' });
       if (!(await orgAuthed(req, t)) && !(await savedOrgTournament(req,t))) return send(res, 403, { error: 'Sign in as organiser on the device holding this tournament organiser link.' });
+      if (await orgResetBlocked(res)) return;
       let curCount;
       try { curCount = (await store.byTournament(t.id)).length; }
       catch (e) { if (e && e.canonical) throw e; return send(res, 503, { error: 'The live store is unreachable right now, so tournament matches cannot be created. Try again shortly.' }); }
