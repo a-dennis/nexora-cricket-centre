@@ -363,25 +363,29 @@ function makeFirebaseStore(pg) {
     async setConfig(id, config, bump) {
       const kind0 = await pg.manifestGet(id);
       if (kind0 === 'match-degraded') return pg.setConfig(id, config, bump); // Postgres-canonical until lifted
-      const g = await fbd.get('matches/' + id, true);
+      const { path } = await fbMatchPath(id);
+      const g = await fbd.get(path, true);
       if (!g.data || typeof g.data !== 'object') {
         if (kind0 === 'match') throw canonicalMissing('match', id);
         return pg.setConfig(id, config, bump);
       }
+      // Firebase stores ONLY the allowlisted public projection; the full config
+      // (private fields) lives in the Postgres replica and merges back at serve time.
+      const pub = publicMatchConfig(config);
       const attempt = (cur, etag) => {
-        const next = Object.assign({}, cur, { config });
+        const next = Object.assign({}, cur, { config: pub });
         if (bump) { next.rev = (cur.rev || 0) + 1; next.updated = iso(); }
-        return fbd.put('matches/' + id, next, etag || undefined);
+        return fbd.put(path, next, etag || undefined);
       };
       try { await attempt(g.data, g.etag); }
       catch (e) {
         if (e.status !== 412) throw e;
-        const g2 = await fbd.get('matches/' + id, true);
+        const g2 = await fbd.get(path, true);
         if (!g2.data || typeof g2.data !== 'object') throw e;
         await attempt(g2.data, g2.etag); // a second conflict surfaces as an error
       }
       // Canonical commit succeeded; replica is best-effort, reconcile repairs drift.
-      try { const cur = await fbd.get('matches/' + id); if (cur) await pg.exportMatchUpdate(id, config, cur.events || [], cur.rev || 0, cur.updated || iso(), (cur.rev || 0) - (bump ? 1 : 0)); } catch (e) { console.error('replica setConfig failed for ' + id + ' (reconcile repairs)', e); }
+      try { const cur = await fbd.get(path); if (cur) await pg.exportMatchUpdate(id, config, cur.events || [], cur.rev || 0, cur.updated || iso(), (cur.rev || 0) - (bump ? 1 : 0)); } catch (e) { console.error('replica setConfig failed for ' + id + ' (reconcile repairs)', e); }
     },
     // Bounded read WITHOUT RTDB indexes: the frozen rules carry no .indexOn and the real
     // REST API REJECTS unindexed orderBy/equalTo queries with 400 (verified against the
@@ -392,27 +396,39 @@ function makeFirebaseStore(pg) {
     async byTournament(tid) {
       const legacyRows = await pg.byTournament(tid);
       let shallow;
-      try { shallow = await fbd.getShallow('matches'); }
+      try { shallow = await fbd.getShallow('tournaments/' + tid + '/matches'); }
       catch (e) { if ((await pg.manifestGet(tid)) === 'tournament-degraded') return legacyRows; throw e; } // degraded tournament serves Postgres-only during an outage
       const fbIds = shallow && typeof shallow === 'object' ? Object.keys(shallow) : [];
       const fbSet = new Set(fbIds);
       const out = [];
       const seen = new Set();
+      const present = [];
       for (const m of legacyRows) {
         seen.add(m.id);
         if (!fbSet.has(m.id)) { out.push(m); continue; } // legacy or degraded: Postgres copy
-        const g = await fbd.get('matches/' + m.id);
-        if (!g || typeof g !== 'object' || !g.config) throw canonicalMissing('match', m.id);
-        out.push({ id: m.id, config: g.config, events: Array.isArray(g.events) ? g.events : [], keyHash: m.keyHash, rev: g.rev || 0, updated: g.updated, created: g.created });
+        present.push(m);
+      }
+      // The nested node is tournament-scoped by construction; membership in
+      // tournaments/<tid>/matches IS the canonical tid assignment (no public tid field).
+      for (let i = 0; i < present.length; i += 8) {
+        const got = await Promise.all(present.slice(i, i + 8).map((m) => fbd.get('tournaments/' + tid + '/matches/' + m.id).then((g) => ({ m, g }))));
+        for (const { m, g } of got) {
+          if (!g || typeof g !== 'object' || !g.config) throw canonicalMissing('match', m.id);
+          out.push({ id: m.id, config: mergedConfig(g.config, m.config), events: Array.isArray(g.events) ? g.events : [], keyHash: m.keyHash, rev: g.rev || 0, updated: g.updated, created: g.created });
+        }
       }
       // Canonical matches whose Postgres replica is missing (post-loss window; reconcile
       // repairs): bounded backfill so the tournament view stays complete meanwhile.
-      const orphans = fbIds.filter((id) => !seen.has(id)).slice(0, 100);
-      for (const id of orphans) {
-        const g = await fbd.get('matches/' + id);
-        if (g && typeof g === 'object' && g.config && g.config.tid === tid) {
-          const keyHash = await pg.matchKeyGet(id);
-          out.push({ id, config: g.config, events: Array.isArray(g.events) ? g.events : [], keyHash: keyHash || '', rev: g.rev || 0, updated: g.updated, created: g.created });
+      const orphans = fbIds.filter((id) => !seen.has(id));
+      for (let i = 0; i < orphans.length; i += 8) {
+        const got = await Promise.all(orphans.slice(i, i + 8).map((id) => fbd.get('tournaments/' + tid + '/matches/' + id).then((g) => ({ id, g }))));
+        for (const { id, g } of got) {
+          if (g && typeof g === 'object' && g.config) {
+            const keyHash = await pg.matchKeyGet(id);
+            const pgRow = await pg.get(id);
+            out.push({ id, config: mergedConfig(g.config, pgRow && pgRow.config), events: Array.isArray(g.events) ? g.events : [], keyHash: keyHash || '', rev: g.rev || 0, updated: g.updated, created: g.created });
+            if (out.length > MAX_PER_TOURNAMENT + 40) { const err = new Error('Tournament match backfill exceeded safe capacity - reconcile required'); err.status = 500; throw err; }
+          }
         }
       }
       return out;
@@ -424,20 +440,21 @@ function makeFirebaseStore(pg) {
       // record itself is only inserted when absent (never overwritten).
       await pg.matchKeySet(m.id, m.keyHash);
       const localAdded = await pg.importMatch(m);
-      const existing = await fbd.get('matches/' + m.id);
-      if (!existing) await fbd.put('matches/' + m.id, fbMatchRec(m.config, m.events || [], m.rev || 0, m.created, m.updated));
+      const mpath = matchPath(tidOf(m.config), m.id);
+      const existing = await fbd.get(mpath);
+      if (!existing) await fbd.put(mpath, fbMatchRec(m.config, m.events || [], m.rev || 0, m.created, m.updated));
       await pg.manifestSet(m.id, 'match');
       return localAdded || !existing;
     },
     async deleteBackedUpMatch(expected) {
-      const g = await fbd.get('matches/' + expected.id);
+      const g = await fbd.get(matchPath(tidOf(expected.config), expected.id));
       if (!g || typeof g !== 'object') return pg.deleteBackedUpMatch(expected);
       const legacy = await pg.get(expected.id);
       const keyHash = await matchKeyHash(expected.id, legacy);
       const cur = { id: expected.id, config: g.config, events: Array.isArray(g.events) ? g.events : [], keyHash, rev: g.rev || 0 };
       if (matchSnapshot([cur]) !== matchSnapshot([expected])) return false;
       await pg.snapshotSave('match:' + expected.id, cur); // version preserved before the owner-authorised delete
-      await fbd.del('matches/' + expected.id);
+      await fbd.del(matchPath(tidOf(expected.config), expected.id));
       await pg.matchKeyDel(expected.id);
       await pg.manifestDel(expected.id);
       if (legacy) await pg.deleteMatchRow(expected.id); // drop the stale migrated/replica copy
@@ -447,9 +464,9 @@ function makeFirebaseStore(pg) {
       const all = await allMatchesMerged();
       if (matchSnapshot(all) !== matchSnapshot(expected)) return false;
       await pg.snapshotSave('matches:all', all); // version preserved before the owner-authorised replace
-      for (const id of await fbMatchIds()) { await fbd.del('matches/' + id); await pg.matchKeyDel(id); await pg.manifestDel(id); }
+      for (const id of await fbMatchIds()) { const r = await pg.get(id); await fbd.del(matchPath(tidOf(r && r.config), id)); await pg.matchKeyDel(id); await pg.manifestDel(id); }
       await pg.deleteAllMatchRows();
-      await fbd.put('matches/' + fresh.id, fbMatchRec(fresh.config, [], 0, iso(), iso()));
+      await fbd.put(matchPath(tidOf(fresh.config), fresh.id), fbMatchRec(fresh.config, [], 0, iso(), iso()));
       await pg.matchKeySet(fresh.id, fresh.keyHash);
       await pg.manifestSet(fresh.id, 'match');
       return true;
