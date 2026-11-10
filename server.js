@@ -815,7 +815,14 @@ async function orgpassRec() { let ph = null; try { ph = JSON.parse((await store.
 async function orgpassLegacy() { const ph = await orgpassRec(); return !!(ph && ph.v !== 2); }
 // Security audit trail (orgaudit_YYYY-MM-DD settings rows): times + event names + IP
 // only - never passwords, tokens, links or key material.
-async function auditOrg(event, detail) {
+// Audit calls are fire-and-forget at call sites; serialize the read-modify-write
+// through a queue so concurrent events never overwrite each other.
+let auditQ = Promise.resolve();
+function auditOrg(event, detail) {
+  auditQ = auditQ.then(() => auditOrgNow(event, detail));
+  return auditQ;
+}
+async function auditOrgNow(event, detail) {
   try {
     const k = 'orgaudit_' + new Date().toISOString().slice(0, 10);
     const cur = (await store.getSetting(k)) || '';
