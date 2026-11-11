@@ -1400,15 +1400,21 @@ async function handle(req, res) {
       teams: teams.filter((x) => x.status === 'approved').map((x) => ({ id: x.id, name: x.name, players: x.players.map((p) => p.name + (p.role === 'c' ? ' (C)' : p.role === 'vc' ? ' (VC)' : '')) })) };
     const orgKey = req.headers['x-org-key'];
     let privileged = false;
-    if (orgKey) {
-      const ip = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
-      if (badAuth(ip)) return send(res, 429, { error: 'Too many failed attempts. Try again later.' });
-      if (!keyEq(orgKey, t.keyHash)) { noteBad(ip); return send(res, 403, { error: 'Not allowed' }); }
+    if (orgKey && keyEq(orgKey, t.keyHash)) {
       privileged = true;
     } else if (await savedOrgTournament(req, t)) {
       // Signed-in session with the current ownership fingerprint: the console's
       // private team/registration view without the raw key on this device.
       privileged = true;
+    } else if (orgKey) {
+      // A stale or wrong key never blocks the view: the request falls through to
+      // whatever it is entitled to without it (bound-session view above, or the
+      // public base view) - a device holding an outdated cached link keeps
+      // working after a key rotation. Only bare key-guessing (no valid session
+      // riding along) counts against the failure throttle.
+      const ip = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
+      if (badAuth(ip)) return send(res, 429, { error: 'Too many failed attempts. Try again later.' });
+      if (!(await validOrgSession(req.headers['x-org-session']))) noteBad(ip);
     }
     if (privileged) {
       resp.registration = t.regKeyHash ? 'open' : 'closed';
@@ -1453,7 +1459,9 @@ async function handle(req, res) {
     if (!(await store.tsetKey(t.id, h))) return send(res, 500, { error: 'Could not create the link. Try again.' });
     await store.setSetting('orgtour_' + t.id, h);
     auditOrg('organiser_link_created', { ip, tournament: t.id });
-    return send(res, 200, { ok: true, id: t.id, orgKey: key, organiserPath: '/t/' + t.id + '?key=' + key });
+    // Fragment form only: a ?key= query leaks the raw key into server/proxy logs
+    // and browser history; the #o= fragment never leaves the device.
+    return send(res, 200, { ok: true, id: t.id, orgKey: key, organiserPath: '/t/' + t.id + '#o=' + key });
   }
   if ((mt = p.match(/^\/api\/tournaments\/([a-z0-9]{6,12})\/listed$/)) && req.method === 'POST') {
     const ip = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
