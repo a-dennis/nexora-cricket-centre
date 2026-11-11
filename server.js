@@ -23,7 +23,7 @@ function makePgStore() {
     const kready = pool.query('CREATE TABLE IF NOT EXISTS cricket_match_keys (id TEXT PRIMARY KEY, key_hash TEXT NOT NULL)');
     const fready = pool.query('CREATE TABLE IF NOT EXISTS cricket_fb_manifest (id TEXT PRIMARY KEY, kind TEXT NOT NULL, since TIMESTAMPTZ NOT NULL DEFAULT now())');
     const nready = pool.query('CREATE TABLE IF NOT EXISTS cricket_replica_snapshots (seq BIGSERIAL PRIMARY KEY, entity_id TEXT NOT NULL, at TIMESTAMPTZ NOT NULL DEFAULT now(), payload JSONB NOT NULL)');
-    const row = (r) => r && { id: r.id, config: r.config, events: r.events, keyHash: r.key_hash, rev: r.rev, updated: r.updated_at };
+    const row = (r) => r && { id: r.id, config: r.config, events: r.events, keyHash: r.key_hash, rev: r.rev, created: r.created_at, updated: r.updated_at };
     return {
       kind: 'durable',
       async matchKeySet(id, keyHash) { await kready; await pool.query('INSERT INTO cricket_match_keys(id,key_hash) VALUES($1,$2) ON CONFLICT (id) DO UPDATE SET key_hash=$2', [id, keyHash]); },
@@ -172,6 +172,10 @@ const mergedConfig = (fbCfg, pgCfg) => {
   }
   return out;
   };
+// Module-scope timestamp helper: fbMatchRec lives at module scope and must not
+// depend on closures inside makeFirebaseStore (a degraded-match reconcile lift
+// calls it with a Postgres row whose created/updated may be absent).
+const iso = () => new Date().toISOString();
 const fbMatchRec = (config, events, rev, created, updated) => ({ config: publicMatchConfig(config), events, rev, created: created || iso(), updated: updated || iso() });
   // Firebase records carry PUBLIC fields only - never employee IDs or departments,
   // for ANY tournament including whxrz4tw. The PII merge join key is (team id, player
@@ -194,7 +198,6 @@ function makeStore() {
 // served by private link and are never pushed to the public path.
 function makeFirebaseStore(pg) {
   const fbd = require('./firebase-db');
-  const iso = () => new Date().toISOString();
   // Nested layout (approved): every match lives under its tournament folder, or under
   // practice/ when it belongs to no tournament:
   //   nexoraCentre/tournaments/<tid>/info    {name, listed, created, registration}
@@ -638,7 +641,8 @@ function makeFirebaseStore(pg) {
             const legacy = await pg.tget(id);
             if (!legacy) { out.conflicts.push({ id, reason: 'degraded tournament missing from Postgres' }); continue; }
             const approved = cleanStoredTeams(legacy.teams).filter((x) => x.status === 'approved').map((t) => publicTeam(t));
-            out.lifted.push({ tournament: id });
+            // Report a lift only after it actually landed: on a failed apply the id
+            // belongs in errors alone, never in lifted.
             if (!dry) {
               const teamMap = {};
               for (const t of approved) teamMap[t.id] = t;
@@ -648,6 +652,7 @@ function makeFirebaseStore(pg) {
               await fbd.put('tournaments/' + id + '/info', { name: legacy.name, listed: !!legacy.listed, created: legacy.created || iso(), registration: !!legacy.regKeyHash });
               await pg.manifestSet(id, 'tournament');
             }
+            out.lifted.push({ tournament: id });
           }
           if (man[id] === 'match-degraded') {
             const legacy = await pg.get(id);
@@ -665,8 +670,10 @@ function makeFirebaseStore(pg) {
               if (!dry) await pg.manifestSet(id, 'match');
               continue;
             }
-            out.lifted.push({ match: id });
+            // Report a lift only after it actually landed (the pre-fix order listed
+            // failed lifts as lifted while they stayed match-degraded in Postgres).
             if (!dry) { await fbd.put(mpath, fbMatchRec(legacy.config, legacy.events || [], legacy.rev || 0, legacy.created, legacy.updated)); await pg.manifestSet(id, 'match'); }
+            out.lifted.push({ match: id });
           }
         } catch (e) { out.errors.push({ id, error: String((e && e.message) || e).slice(0, 200) }); }
       }
