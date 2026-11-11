@@ -923,6 +923,13 @@ async function canManageMatchMedia(req, m) {
 
 // Link-only scoring is independent of organiser password state. Media still needs
 // an existing approved-device grant or a post-reset owner session.
+async function matchAccessView(req, m) {
+  const view = publicView(m);
+  view.teamRefs = registeredTeamRefs(m, m.config.tid ? await store.tget(m.config.tid) : null);
+  view.canScore = await canScore(req, m);
+  view.canManageMedia = await canManageMatchMedia(req, m);
+  return view;
+}
 async function scoreResetBlocked(req, res, m) {
   if (keyEq(req.headers['x-scorer-key'], m.keyHash)) return false;
   if (!(await organiserOwnsMatch(req, m))) return false;
@@ -1620,7 +1627,7 @@ async function handle(req, res) {
     const m = await store.get(mt[1]);
     if (!m) return send(res, 404, { error: 'Match not found' });
     if (url.searchParams.get('rev') === String(m.rev)) return send(res, 200, { unchanged: true, rev: m.rev });
-    const view = publicView(m); view.teamRefs = registeredTeamRefs(m, m.config.tid ? await store.tget(m.config.tid) : null); view.canScore = await canScore(req, m); view.canManageMedia = await canManageMatchMedia(req, m); return send(res, 200, view);
+    return send(res, 200, await matchAccessView(req, m));
   }
   if ((mt = p.match(/^\/api\/matches\/([a-z0-9]{6,12})\/(event|undo)$/)) && req.method === 'POST') {
     const m = await store.get(mt[1]);
@@ -1628,7 +1635,7 @@ async function handle(req, res) {
     if (!(await canScore(req,m))) return send(res, 403, { error: 'This device cannot score. Use the scorer link or verified organiser access.' });
     if (await scoreResetBlocked(req, res, m)) return;
     const body = await readBody(req);
-    if (body.rev !== undefined && body.rev !== m.rev) return send(res, 409, { error: 'Match changed on another device. Refreshed.', match: publicView(m) });
+    if (body.rev !== undefined && body.rev !== m.rev) return send(res, 409, { error: 'Match changed on another device. Refreshed.', match: await matchAccessView(req, m) });
     let events = m.events.slice();
     if (mt[2] === 'undo') {
       if (!events.length) return send(res, 400, { error: 'Nothing to undo' });
@@ -1646,9 +1653,9 @@ async function handle(req, res) {
       if (events.length > 800) return send(res, 400, { error: 'Too many events for one match' });
     }
     const ok = await store.update(m.id, events, m.rev);
-    if (!ok) { const m2 = await store.get(m.id); return send(res, 409, { error: 'Match changed on another device. Refreshed.', match: publicView(m2) }); }
+    if (!ok) { const m2 = await store.get(m.id); return send(res, 409, { error: 'Match changed on another device. Refreshed.', match: await matchAccessView(req, m2) }); }
     const m3 = await store.get(m.id);
-    return send(res, 200, publicView(m3));
+    return send(res, 200, await matchAccessView(req, m3));
   }
   if (p.startsWith('/api/')) return send(res, 404, { error: 'Unknown API' });
   if (req.method !== 'GET' && req.method !== 'HEAD') { res.writeHead(405); return res.end(); }
