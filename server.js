@@ -889,13 +889,9 @@ function publicNameProblem(s) {
 }
 const PUBLIC_NAME_MSG = 'Visible to everyone. Do not enter phone numbers or private details.';
 
-// Scoring access, two ways in and no others:
-// 1. A ground device the organiser approved for THIS match (scorer link key + its
-//    approved device grant). The raw scorer link alone writes nothing - no events,
-//    no undo, no video, no backup. Grants are match-scoped and expire.
-// 2. The organiser's own signed-in session, scoped to proven ownership: a
-//    tournament match needs the carried orgtour fingerprint, a practice match is
-//    the organiser's own. No special-case bypass for any match.
+// Scorer links grant scores and undo for THIS match only, without a device approval.
+// Video and private backups retain the existing approved-device or owner check.
+// Organiser access still requires a signed-in session and proven ownership.
 async function organiserOwnsMatch(req, m) {
   if (!(await validOrgSession(req.headers['x-org-session']))) return false;
   const tid = m.config && m.config.tid;
@@ -915,6 +911,9 @@ async function scorerDeviceGrant(matchId, token) {
   return g.status === 'approved' ? 'approved' : (g.status === 'pending' ? 'pending' : (g.status === 'dismissed' ? 'dismissed' : null));
 }
 async function canScore(req, m) {
+  return keyEq(req.headers['x-scorer-key'], m.keyHash) || organiserOwnsMatch(req, m);
+}
+async function canManageMatchMedia(req, m) {
   if (keyEq(req.headers['x-scorer-key'], m.keyHash)) {
     const st = await scorerDeviceGrant(m.id, req.headers['x-scorer-device']);
     if (st === 'approved') return true;
@@ -922,12 +921,14 @@ async function canScore(req, m) {
   return organiserOwnsMatch(req, m);
 }
 
-// Organiser-session scoring (ball-by-ball, video via his signed-in session) is an
-// organiser action: a legacy (pre-policy) password blocks it until reset, exactly
-// like the console routes. An APPROVED scorer device is the ground person's
-// independent grant and is never blocked by the organiser password state. Auth
-// failure keeps its own 403; only a valid organiser session gets the reset signal.
+// Link-only scoring is independent of organiser password state. Media still needs
+// an existing approved-device grant or a post-reset owner session.
 async function scoreResetBlocked(req, res, m) {
+  if (keyEq(req.headers['x-scorer-key'], m.keyHash)) return false;
+  if (!(await organiserOwnsMatch(req, m))) return false;
+  return orgResetBlocked(res);
+}
+async function mediaResetBlocked(req, res, m) {
   if (keyEq(req.headers['x-scorer-key'], m.keyHash) &&
       (await scorerDeviceGrant(m.id, req.headers['x-scorer-device'])) === 'approved') return false;
   if (!(await organiserOwnsMatch(req, m))) return false;
@@ -1302,8 +1303,8 @@ async function handle(req, res) {
     if (committed === false) { out.degraded = true; out.notice = 'Saved on the server. Firebase sync is pending.'; }
     return send(res, 201, out);
   }
-  // A ground device claims scoring for one match with its scorer link. The organiser
-  // approves the pending claim remotely from the console; the raw link alone writes nothing.
+  // Compatibility path for older clients: claims retain video/backup permissions.
+  // Ordinary scoring now needs only the private scorer link, not this grant.
   if ((mt = p.match(/^\/api\/matches\/([a-z0-9]{6,12})\/scorer-claim$/)) && req.method === 'POST') {
     const ip = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
     if (badAuth(ip) || limited(ip)) return send(res, 429, { error: 'Too many attempts. Try again later.' });
@@ -1376,7 +1377,7 @@ async function handle(req, res) {
     if (badAuth(ip)) return send(res, 429, { error: 'Too many failed attempts. Try again later.' });
     const m = await store.get(mt[1]);
     if (!m) return send(res, 404, { error: 'Match not found' });
-    if (!(await canScore(req,m))) { noteBad(ip); return send(res, 403, { error: 'Only an authorized scorer can download the match backup.' }); }
+    if (!(await canManageMatchMedia(req,m))) { noteBad(ip); return send(res, 403, { error: 'An approved media device or organiser access is required for match backups.' }); }
     return send(res, 200, { format: 'cricket-backup', version: 1, exportedAt: new Date().toISOString(), storage: store.kind, counts: { matches: 1, tournaments: 0 }, tournaments: [], matches: [{ id: m.id, config: m.config, events: m.events, keyHash: m.keyHash, rev: m.rev, updated: m.updated }] });
   }
   if ((mt = p.match(/^\/api\/tournaments\/([a-z0-9]{6,12})\/backup$/)) && req.method === 'GET') {
@@ -1551,8 +1552,8 @@ async function handle(req, res) {
   if ((mt = p.match(/^\/api\/matches\/([a-z0-9]{6,12})\/video$/)) && req.method === 'POST') {
     const m = await store.get(mt[1]);
     if (!m) return send(res, 404, { error: 'Match not found' });
-    if (!(await canScore(req,m))) return send(res, 403, { error: 'Use this match\'s scorer link or verified organiser access to set the live video.' });
-    if (await scoreResetBlocked(req, res, m)) return;
+    if (!(await canManageMatchMedia(req,m))) return send(res, 403, { error: 'An approved media device or organiser access is required to set the live video.' });
+    if (await mediaResetBlocked(req, res, m)) return;
     const body = await readBody(req);
     const source = body.source || 'youtube';
     if (!['youtube','ninja'].includes(source)) return send(res, 400, {error:'Choose YouTube or VDO.Ninja.'});
@@ -1619,7 +1620,7 @@ async function handle(req, res) {
     const m = await store.get(mt[1]);
     if (!m) return send(res, 404, { error: 'Match not found' });
     if (url.searchParams.get('rev') === String(m.rev)) return send(res, 200, { unchanged: true, rev: m.rev });
-    const view = publicView(m); view.teamRefs = registeredTeamRefs(m, m.config.tid ? await store.tget(m.config.tid) : null); view.canScore = await canScore(req, m); return send(res, 200, view);
+    const view = publicView(m); view.teamRefs = registeredTeamRefs(m, m.config.tid ? await store.tget(m.config.tid) : null); view.canScore = await canScore(req, m); view.canManageMedia = await canManageMatchMedia(req, m); return send(res, 200, view);
   }
   if ((mt = p.match(/^\/api\/matches\/([a-z0-9]{6,12})\/(event|undo)$/)) && req.method === 'POST') {
     const m = await store.get(mt[1]);
