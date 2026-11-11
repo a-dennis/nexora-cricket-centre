@@ -334,7 +334,8 @@ var path=location.pathname;
 var mm=path.match(/^\/(m|s|t|r)\/([a-z0-9]+)/);
 var mode=mm?mm[1]:(path.replace(/\/+$/,'')==='/launch'?'launch':'home'), id=mm?mm[2]:null;
 function hasScoring(){return !!(S&&S.canScore);}
-var S=null, T=null, ym=null, selDay=null, key=null, tab='live', busy=false, extra='', sheet=null, lastOk=0, err=null, polling=null, info={storage:'?'}, claimStatus=null, claimBusy=false, fbSub=false;
+function hasMatchMedia(){return !!(S&&S.canManageMedia);}
+var S=null, T=null, ym=null, selDay=null, key=null, tab='live', busy=false, extra='', sheet=null, lastOk=0, err=null, polling=null, info={storage:'?'}, fbSub=false;
 function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
 function ini(n){var w=String(n).trim().split(/\s+/);return (w.length>1?w[0][0]+w[1][0]:String(n).slice(0,2)).toUpperCase()}
 function toast(m,ok){var t=document.createElement('div');t.className='toast'+(ok?' ok':'');t.textContent=m;document.body.appendChild(t);setTimeout(function(){t.remove()},2600)}
@@ -786,7 +787,7 @@ function renderOrgArea(area){
   h+='</div>';
   h+='<h1>Camera operator</h1><div class="card"><b>Camera-only helper</b><div class="mut" style="margin-top:8px">Share this page with the camera phone. It has no scoring access. They start their own camera and send you only its viewing link to publish.</div><a class="btn sec" style="margin-top:12px;text-decoration:none" href="/camera" target="_blank" rel="noopener">Open camera helper</a></div>';
   h+=ninjaPreviewCard();
-  h+='<h1>Scoring devices</h1><div class="card"><b>Ground scoring devices</b><div class="mut" style="margin-top:8px">A scorer opens their match scorer link on the ground and requests approval from this console. Approve only the device you expect; revoking ends its access straight away.</div><div id="ogdev" style="margin-top:10px"><span class="mut">Loading&hellip;</span></div></div>';
+  h+='<h1>Match access</h1><div class="card"><b>Scorer links work straight away</b><div class="mut" style="margin-top:8px">Open the private scorer link and score. No approval is needed. Anyone with that link can score and undo that match, so keep it private.</div><details style="margin-top:12px"><summary>Older video and backup permissions</summary><div class="mut" style="margin-top:8px">These permissions do not control scoring. Revoking one does not stop a valid scorer link.</div><div id="ogdev" style="margin-top:10px"><span class="mut">Loading&hellip;</span></div></details></div>';
   h+='<h1>Organiser links</h1><div class="card"><b>Replace an organiser link</b><div class="mut" style="margin-top:8px">Creates a fresh private organiser link. The old link for that tournament stops working straight away. The new link shows only on this screen - share it privately, never in a group.</div><div id="ogl"></div></div>';
   h+=matchForm()+tourInner();
   area.innerHTML=h;
@@ -798,13 +799,13 @@ function loadOrgDevices(){
   api('GET','/api/scorer-devices').then(function(r){
     if(!r.ok){box.innerHTML='<span class="mut">'+esc(r.j&&r.j.error||'Could not load devices')+'</span>';return}
     var ds=(r.j.devices||[]).filter(function(d){return d.status!=='revoked'});
-    if(!ds.length){box.innerHTML='<span class="mut">No devices have requested scoring access.</span>';return}
+    if(!ds.length){box.innerHTML='<span class="mut">No older video or backup device grants.</span>';return}
     var h='';
     ds.forEach(function(d){
       h+='<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 0;border-top:1px solid #e5e0d8">'
-        +'<div><b>'+esc(d.label||'Unnamed device')+'</b><div class="mut" style="font-size:12.5px">'+esc(d.title||d.matchId)+' · '+(d.status==='pending'?'waiting for approval':d.status)+(d.exp?' · till '+String(d.exp).slice(0,10):'')+'</div></div>'
-        +(d.status==='pending'?'<button class="btn pri small" data-dev-a="approve" data-dev-m="'+esc(d.matchId)+'" data-dev-c="'+esc(d.claim)+'">Approve</button><button class="btn sec small" style="margin-left:6px" data-dev-a="dismiss" data-dev-m="'+esc(d.matchId)+'" data-dev-c="'+esc(d.claim)+'">Dismiss</button>':'')
-        +(d.status==='approved'?'<button class="btn sec small" data-dev-a="revoke" data-dev-m="'+esc(d.matchId)+'" data-dev-c="'+esc(d.claim)+'">Revoke</button>':'')
+        +'<div><b>'+esc(d.label||'Unnamed device')+'</b><div class="mut" style="font-size:12.5px">'+esc(d.title||d.matchId)+' · '+(d.status==='pending'?'waiting for media access':d.status)+(d.exp?' · till '+String(d.exp).slice(0,10):'')+'</div></div>'
+        +(d.status==='pending'?'<button class="btn pri small" data-dev-a="approve" data-dev-m="'+esc(d.matchId)+'" data-dev-c="'+esc(d.claim)+'">Allow media</button><button class="btn sec small" style="margin-left:6px" data-dev-a="dismiss" data-dev-m="'+esc(d.matchId)+'" data-dev-c="'+esc(d.claim)+'">Dismiss</button>':'')
+        +(d.status==='approved'?'<button class="btn sec small" data-dev-a="revoke" data-dev-m="'+esc(d.matchId)+'" data-dev-c="'+esc(d.claim)+'">Revoke media</button>':'')
         +'</div>';
     });
     box.innerHTML=h;
@@ -812,7 +813,7 @@ function loadOrgDevices(){
       b.onclick=function(){
         b.disabled=true;
         api('POST','/api/scorer-devices',{matchId:b.getAttribute('data-dev-m'),claim:b.getAttribute('data-dev-c'),action:b.getAttribute('data-dev-a')}).then(function(r){
-          toast(r.ok?({approve:'Device approved',revoke:'Device revoked',dismiss:'Claim dismissed'})[b.getAttribute('data-dev-a')]:(r.j&&r.j.error||'Failed'),!!r.ok);
+          toast(r.ok?({approve:'Media access allowed',revoke:'Media access revoked',dismiss:'Claim dismissed'})[b.getAttribute('data-dev-a')]:(r.j&&r.j.error||'Failed'),!!r.ok);
           loadOrgDevices();
         }).catch(function(){toast('No connection. Try again.');loadOrgDevices()});
       };
@@ -998,11 +999,11 @@ function wireLink(){
   var g=document.getElementById('ogo');if(!g)return;
   g.onclick=function(){
     var u=(v('olink')||'').trim();if(!u)return;
-    var m=u.match(/^https?:\/\/([a-z0-9.:-]+)(\/[tmr]\/[a-z0-9]{6,12})(#.*)?$/i);
+    var m=u.match(/^https?:\/\/([a-z0-9.:-]+)(\/[tmsr]\/[a-z0-9]{6,12})(#.*)?$/i);
     if(m){if(m[1]!==location.host){toast('That link is for a different app');return}location.href=m[2]+(m[3]||'');return}
-    var p=u.match(/^(\/[tmr]\/[a-z0-9]{6,12})(#.*)?$/i);
+    var p=u.match(/^(\/[tmsr]\/[a-z0-9]{6,12})(#.*)?$/i);
     if(p){location.href=p[1]+(p[2]||'');return}
-    toast('Paste a full match or calendar link from this app');
+    toast('Paste a full match, scorer or calendar link from this app');
   };
 }
 function appCard(){
@@ -1030,7 +1031,7 @@ function showTour(j){
   app.innerHTML='<div class="top"><b class="brand"><i class="mark"></i>KCL (KPD Cricket League)</b><span></span></div><h2>'+esc(j.name)+'</h2>'+
   '<div class="card"><h1 style="margin-top:0">1. Calendar link (share with everyone, view only)</h1><div class="link">'+esc(cu)+'</div><button class="btn sec" id="cc">Copy</button></div>'+
   '<div class="card"><h1 style="margin-top:0">2. Organiser link (keep private)</h1><div class="link">'+esc(ou)+'</div>'+
-  '<div class="warn">Anyone with this link can add matches to this calendar. Keep it with the organisers and save it somewhere safe. It is also remembered on this device.</div><button class="btn sec" id="co">Copy</button></div>'+
+  '<div class="warn">Organisers must sign in to add matches to this calendar. Keep this link private and save it somewhere safe. It is also remembered on this device.</div><button class="btn sec" id="co">Copy</button></div>'+
   '<button class="btn pri" id="oc">Open calendar</button><div style="height:10px"></div><button class="btn sec" id="am">Add a match</button>'+FOOT;
   document.getElementById('cc').onclick=function(){copyTxt(cu)};document.getElementById('co').onclick=function(){copyTxt(ou)};
   document.getElementById('oc').onclick=function(){location.href=cu};document.getElementById('am').onclick=function(){location.href='/?t='+j.id};
@@ -1118,7 +1119,7 @@ function renderT(){
   var mo2=document.getElementById('mintorg');if(mo2)mo2.onclick=function(){mo2.disabled=true;api('POST','/api/tournaments/'+id+'/organiser-link',{}).then(function(r){mo2.disabled=false;if(!r.ok){toast(r.j.error||'Could not create the link');return}tSave({id:id,name:T.name,key:r.j.orgKey});copyTxt(location.origin+'/t/'+id+'#o='+r.j.orgKey);toast('New private organiser link copied - keep it private',1);loadT(true)}).catch(function(){mo2.disabled=false;toast('No connection. Try again.')})};
 }
 function videoCard(){
-  if(mode!=='s'||!S||!hasScoring())return'';
+  if(mode!=='s'||!S||!hasMatchMedia())return'';
   var ninja=S.config&&ninjaViewUrl(S.config.ninjaView),cv=ninja||((S.config&&S.config.videoId)?('https://www.youtube.com/watch?v='+S.config.videoId):'');
   return '<h1>Public match video</h1><div class="card"><label>Video source</label><select id="vidsource"><option value="youtube"'+(!ninja?' selected':'')+'>YouTube</option><option value="ninja"'+(ninja?' selected':'')+'>VDO.Ninja VIEW link</option></select><label>Viewing link</label><input id="vidu" type="url" autocomplete="off" placeholder="YouTube link or https://vdo.ninja/?view=..." value="'+esc(cv)+'"><div class="mut" style="font-size:12.5px;margin-top:6px">Saving publishes this viewing link to everyone opening this match. Only share an agreed camera feed. Never paste a camera/push, room or director link. One source at a time; saving replaces the previous public video. The private Organiser preview is separate.</div><div class="mut" style="font-size:12.5px;margin-top:8px">VDO.Ninja: keep the camera phone awake and connected. Each viewer can add upload load on the camera phone; test a small audience first. For a large audience, use YouTube. Clear the public link when finished and stop capture on the phone too.</div><div class="grid" style="grid-template-columns:1fr 1fr;margin-top:10px"><button class="btn sec" id="vidclr">Clear public video</button><button class="btn pri" id="vidsv">Publish viewing link</button></div></div>';
 }
@@ -1130,7 +1131,7 @@ document.addEventListener('click',function(e){
 });
 document.addEventListener('click',function(e){
   if(!e.target||(e.target.id!=='vidsv'&&e.target.id!=='vidclr'))return;
-  if(mode!=='s'||!S||!hasScoring())return;
+  if(mode!=='s'||!S||!hasMatchMedia())return;
   var inp=document.getElementById('vidu');
   var val=e.target.id==='vidclr'?'':(inp?inp.value:'');
   api('POST','/api/matches/'+id+'/video',{video:val,source:document.getElementById('vidsource').value}).then(function(r){
@@ -1173,8 +1174,7 @@ function load(first){
     err=null;lastOk=Date.now();
     if(!r.j.unchanged){if(!r.j.teamRefs&&S&&S.teamRefs)r.j.teamRefs=S.teamRefs;S=r.j;if(S&&S.canScore===undefined)S.canScore=false;if(!sheetOpenLock())render()}else if(mode==='m'||mode==='s')tickLabel();
     if(mode==='s'&&S&&!fbSub){fbSub=true;fbLive(S.config&&S.config.tid?('tournaments/'+S.config.tid+'/matches/'+id):('practice/'+id),function(){load()})}
-    if(mode==='s'&&key&&S&&!S.canScore){var dt=null;try{dt=localStorage.getItem('sdev_'+id)}catch(e){}
-      fetch('/api/matches/'+id+'/scorer-claim',{headers:Object.assign({'x-scorer-key':key},dt?{'x-scorer-device':dt}:{})}).then(function(r){return r.json()}).then(function(j){var st=j&&j.status||'none';if(st!==claimStatus){claimStatus=st;if(st==='approved'){load(true);return}render()}}).catch(function(){})}
+
   }).catch(function(){err='Offline, retrying...';tickLabel()});
 }
 function sheetOpenLock(){return sheet&&sheet.lock&&mode==='s'&&false}
@@ -1328,7 +1328,7 @@ function render(){
   var publicHost=document.getElementById('publicnjhost'),currentNinja=ninjaViewUrl(S.config.ninjaView);if(publicVideoOpen!==currentNinja)publicVideoOpen='';
   if(currentNinja){if(!publicHost){publicHost=document.createElement('div');publicHost.id='publicnjhost';publicHost.className='wrap';publicHost.style.paddingBottom='0';app.before(publicHost)}if(publicHost.dataset.source!==currentNinja){publicHost.innerHTML=videoCardView();publicHost.dataset.source=currentNinja;wirePublicNinja(null)}}else if(publicHost){publicHost.remove()}
   var h=head()+tabsHtml()+'<div class="dsk '+(mode==='s'?'sc':'vw')+'"><div class="dl">'+viewerBody()+(mode==='s'?'</div><div class="dr">':'');
-  if(mode==='s')h+=scorerPanel()+videoCard()+attachCard()+'<div class="card"><button class="btn sec" id="dlrep">Download match report</button><button class="btn sec" id="dlimg" style="margin-top:10px">Save scorecard as image</button><button class="btn sec" id="dlbk" style="margin-top:10px">Download match backup (file)</button><div class="mut" style="font-size:12.5px;margin-top:8px">The report is a printable match card. The backup file holds every ball and can restore this match later. It never contains your scorer link.</div></div>';
+  if(mode==='s')h+=scorerPanel()+videoCard()+attachCard()+'<div class="card"><button class="btn sec" id="dlrep">Download match report</button><button class="btn sec" id="dlimg" style="margin-top:10px">Save scorecard as image</button>'+(hasMatchMedia()?'<button class="btn sec" id="dlbk" style="margin-top:10px">Download match backup (file)</button>':'')+'<div class="mut" style="font-size:12.5px;margin-top:8px">The report is a printable match card. The backup file holds every ball and can restore this match later. It never contains your scorer link.</div></div>';
   else{h+='<div class="card" style="margin-top:6px"><button class="btn sec" id="share">Share this live scoreboard</button><button class="btn sec" id="dlrep" style="margin-top:10px">Download match report</button><button class="btn sec" id="dlimg" style="margin-top:10px">Save scorecard as image</button></div>'}
   h+='</div></div>'+FOOT;app.innerHTML=h;tickLabel();wire();
   if(mode==='s')openNeeds();
@@ -1378,8 +1378,7 @@ document.addEventListener('click',function(e){
 
 function scorerPanel(){
   if(!hasScoring()){
-    if(key&&claimStatus==='pending')return '<div class="card" style="margin-top:14px"><b>Waiting for approval</b><div class="mut" style="margin-top:8px">The organiser approves this device from their console. This page updates by itself - keep it open.</div></div>';
-    if(key)return '<div class="card" style="margin-top:14px"><b>Score on this device?</b><div class="mut" style="margin-top:8px">For match security the organiser approves each scoring device. Enter a short label (for example, your name) and request approval.</div>'+(claimStatus==='dismissed'?'<div class="warn" style="margin-top:8px">The organiser declined this device. Check with them, then request again.</div>':'')+'<input id="claimlabel" maxlength="40" placeholder="Device label (e.g. Ravi phone)" style="margin-top:10px"><button class="btn pri" id="claimbtn" style="margin-top:10px">Request scoring approval</button></div>';
+    if(key)return '<div class="warn" style="margin-top:14px">This scorer link is not valid for this match. Ask the organiser for the correct private scorer link.</div>';
     return '<div class="warn" style="margin-top:14px">This is a view-only link. Open the scorer link you were given to enter scores.</div>';
   }
   var st=S.state,i=cur();
@@ -1563,18 +1562,6 @@ scorerPanel=function(){
 };
   
 document.addEventListener('click',function(e){if(e.target&&e.target.closest&&e.target.closest('#extrasplus')&&mode==='s')openExtrasPlus()});
-document.addEventListener('click',function(e){
-  if(!(e.target&&e.target.id==='claimbtn')||claimBusy)return;
-  var lb=document.getElementById('claimlabel');var label=lb?lb.value:'';
-  claimBusy=true;
-  fetch('/api/matches/'+id+'/scorer-claim',{method:'POST',headers:{'content-type':'application/json','x-scorer-key':key},body:JSON.stringify({label:label})}).then(function(r){return r.json().then(function(j){return {ok:r.ok,j:j}})}).then(function(r){
-    claimBusy=false;
-    if(r.ok&&r.j.device){try{localStorage.setItem('sdev_'+id,r.j.device)}catch(e){};claimStatus='pending';toast('Approval requested. Waiting for the organiser.',true)}
-    else toast(r.j&&r.j.error||'Could not request approval');
-    render();
-  }).catch(function(){claimBusy=false;toast('No connection. Not saved - try again.');render()});
-});
-  
 function openExtrasPlus(){
   
   if(busy||!S||!hasScoring()||S.state.needs.length||S.state.result)return;
