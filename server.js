@@ -14,6 +14,7 @@ const CREATE_LIMIT = 15; // per IP per hour
 function makePgStore() {
     const { Pool } = require('pg');
     const pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: process.env.PGSSL === 'off' ? false : { rejectUnauthorized: false }, max: 4 });
+    const rosterLocks = new Pool({ connectionString: process.env.DATABASE_URL, ssl: process.env.PGSSL === 'off' ? false : { rejectUnauthorized: false }, max: 1 });
     const ready = pool.query(`CREATE TABLE IF NOT EXISTS cricket_matches (
       id TEXT PRIMARY KEY, config JSONB NOT NULL, events JSONB NOT NULL DEFAULT '[]', key_hash TEXT NOT NULL,
       rev INTEGER NOT NULL DEFAULT 0, created_at TIMESTAMPTZ NOT NULL DEFAULT now(), updated_at TIMESTAMPTZ NOT NULL DEFAULT now())`);
@@ -68,7 +69,9 @@ function makePgStore() {
       async tcreate(t) { await tready; await pool.query('INSERT INTO cricket_tournaments(id,name,key_hash) VALUES($1,$2,$3)', [t.id, t.name, t.keyHash]); },
       async tget(id) { await tready; const r = await pool.query('SELECT * FROM cricket_tournaments WHERE id=$1', [id]); const x = r.rows[0]; return x && { id: x.id, name: x.name, keyHash: x.key_hash, teams: Array.isArray(x.teams) ? x.teams : [], regKeyHash: x.reg_key_hash || null, listed: !!x.listed }; },
       async tsetTeams(id, teams) { await tready; await pool.query('UPDATE cricket_tournaments SET teams=$2 WHERE id=$1', [id, JSON.stringify(teams)]); },
-      async tmutateTeams(id, fn) { await tready; const t = await this.tget(id); if (!t) return false; const teams = fn(t.teams || []); if (!teams) return true; await pool.query('UPDATE cricket_tournaments SET teams=$2 WHERE id=$1', [id, JSON.stringify(teams)]); return true; },
+      async rosterLock(id){if(/pooler|pgbouncer/i.test(new URL(process.env.DATABASE_URL).hostname))throw new Error('Roster editing needs a direct PostgreSQL connection, not a transaction pooler');const c=await rosterLocks.connect();try{await c.query('SELECT pg_advisory_lock(hashtext($1))',['cricket-roster:'+id]);}catch(e){c.release();throw e;}return async()=>{try{await c.query('SELECT pg_advisory_unlock(hashtext($1))',['cricket-roster:'+id]);}finally{c.release();}};},
+      async withRosterLock(id,fn){const release=await this.rosterLock(id);try{return await fn();}finally{await release();}},
+      async tmutateTeams(id, fn) { await tready; const c=await pool.connect();try{await c.query('BEGIN');const r=await c.query('SELECT teams FROM cricket_tournaments WHERE id=$1 FOR UPDATE',[id]);if(!r.rows.length){await c.query('ROLLBACK');return false;}const teams=fn(r.rows[0].teams||[]);if(teams)await c.query('UPDATE cricket_tournaments SET teams=$2 WHERE id=$1',[id,JSON.stringify(teams)]);await c.query('COMMIT');return true;}catch(e){try{await c.query('ROLLBACK');}catch(_){}throw e;}finally{c.release();} },
       async reconcileFromFirebase(dry) { return { dryRun: !!dry, note: 'postgres mode: nothing to reconcile', lifted: [], insertedMatches: [], repairedMatches: [], repairedTournaments: [], syncedFlags: [], conflicts: [], errors: [] }; },
       async tsetReg(id, regKeyHash) { await tready; await pool.query('UPDATE cricket_tournaments SET reg_key_hash=$2 WHERE id=$1', [id, regKeyHash]); },
       async getSetting(k) { await sready; const r = await pool.query('SELECT v FROM cricket_settings WHERE k=$1', [k]); return r.rows[0] ? r.rows[0].v : null; },
@@ -259,10 +262,16 @@ function makeFirebaseStore(pg) {
       return pg.tget(id); // true legacy link-private
     }
     const legacy = await pg.tget(id);
-    const blobTeams = legacy && Array.isArray(legacy.teams) ? legacy.teams : [];
+    let blobTeams = legacy && Array.isArray(legacy.teams) ? legacy.teams : [];
+    const fbTeams = await fbTournamentTeams(id);
+    let journal=null;try{journal=JSON.parse((await pg.getSetting('rosterintent_'+id))||'null');}catch(e){}
+    if(journal&&Array.isArray(journal.teams)){
+      const proj=journal.teams.filter(t=>t.status==='approved').map(publicTeam).sort((a,b)=>a.id.localeCompare(b.id));
+      const landed=JSON.stringify(stableValue(fbTeams.slice().sort((a,b)=>a.id.localeCompare(b.id))));if(JSON.stringify(stableValue(proj))===landed&&(journal.committed===true||journal.before!==landed))blobTeams=journal.teams;
+    }
     const blobById = {};
     for (const t of blobTeams) if (t && t.id) blobById[t.id] = t;
-    const approved = (await fbTournamentTeams(id)).map((t) => {
+    const approved = fbTeams.map((t) => {
       const blob = blobById[t.id] || {};
       const byName = {};
       for (const p of (blob.players || [])) if (p && p.name) byName[String(p.name).toLowerCase()] = p;
@@ -497,6 +506,7 @@ function makeFirebaseStore(pg) {
     // Both intents survive concurrent edits (captain submit vs organiser approve).
     // fn(teams) returns the next full roster, or null for a no-op/conflict signalled by the route.
     async tmutateTeams(id, fn) {
+      return pg.withRosterLock(id,async()=>{
       for (let attempt = 0; attempt < 3; attempt++) {
         const kind0 = await pg.manifestGet(id);
         // Canonical existence is the info node; roster CAS targets the teams node only,
@@ -521,14 +531,18 @@ function makeFirebaseStore(pg) {
         // Conditional PUT of the re-read teams node: the real REST API honors If-Match
         // on PUT (a PATCH commit cannot prove the base ETag, so it would silently lose
         // concurrent intents). The node carries only zero-PII public projections.
+        await pg.setSetting('rosterintent_'+id,JSON.stringify({teams,at:iso(),before:JSON.stringify(stableValue(Object.values(cur.data||{}).sort((a,b)=>a.id.localeCompare(b.id)))),committed:false}));
         try {
           await fbd.put('tournaments/' + id + '/teams', approved, cur.etag || undefined);
-        } catch (e) { if (e.status === 412) continue; throw e; }
+        } catch (e) { if(e.status===412){await pg.setSetting('rosterintent_'+id,null);continue;}throw e; }
+        await pg.setSetting('rosterintent_'+id,JSON.stringify({teams,at:iso(),committed:true}));
         // Canonical commit done. Replica remainder (FULL roster incl. pending + PII) in Postgres.
-        await pg.tsetTeams(id, teams); // failure -> 500; dedupe-on-read + reconcile converge
+        await pg.tsetTeams(id, teams); // journal preserves full intended private roster if this write fails
+        await pg.setSetting('rosterintent_'+id,null);
         return true;
       }
       return false; // CAS retries exhausted -> route maps this to a 409
+      });
     },
     async tsetReg(id, regKeyHash) {
       // Registration key hash is a Postgres secret and leads; the Firebase flag is its projection.
@@ -615,7 +629,8 @@ function makeFirebaseStore(pg) {
       // 1. Degraded creates (Postgres-only after a Firebase outage) -> lift into Firebase.
       const man = await pg.manifestIds();
       for (const id of Object.keys(man)) {
-        try {
+        let release;
+        try {release=await pg.rosterLock(id);
           if (man[id] === 'tournament-degraded') {
             const fb = await fbTournament(id);
             if (fb) {
@@ -675,13 +690,14 @@ function makeFirebaseStore(pg) {
             if (!dry) { await fbd.put(mpath, fbMatchRec(legacy.config, legacy.events || [], legacy.rev || 0, legacy.created, legacy.updated)); await pg.manifestSet(id, 'match'); }
             out.lifted.push({ match: id });
           }
-        } catch (e) { out.errors.push({ id, error: String((e && e.message) || e).slice(0, 200) }); }
+        } catch (e) { out.errors.push({ id, error: String((e && e.message) || e).slice(0, 200) }); }finally{if(release)await release();}
       }
       // 2. Canonical tournaments: converge the Postgres replica row to Firebase truth.
       const tshallow = await fbd.getShallow('tournaments');
       const fbTids = tshallow && typeof tshallow === 'object' ? Object.keys(tshallow) : [];
       for (const id of fbTids) {
-        try {
+        let release;
+        try {release=await pg.rosterLock(id);
           const kindH = await pg.manifestGet(id);
           if (kindH === 'tournament-degraded') continue; // still Postgres-canonical (held divergent or awaiting lift): never converge over it
           if (kindH !== 'tournament') { out.syncedFlags.push({ tournament: id, manifestHealed: true }); if (!dry) await pg.manifestSet(id, 'tournament'); }
@@ -695,7 +711,7 @@ function makeFirebaseStore(pg) {
             out.repairedTournaments.push({ tournament: id, teams: !blobSame, meta: !metaSame });
             if (!dry) {
               await pg.snapshotSave('tournament:' + id, legacy);
-              await pg.tsetTeams(id, merged.teams);
+              await pg.tsetTeams(id, merged.teams);await pg.setSetting('rosterintent_'+id,null);
               if (legacy.name !== merged.name) await pg.trename(id, merged.name);
               if (!!legacy.listed !== !!merged.listed) await pg.tsetListed(id, merged.listed);
             }
@@ -706,7 +722,7 @@ function makeFirebaseStore(pg) {
             out.syncedFlags.push({ tournament: id, registration: !!merged.regKeyHash });
             if (!dry) await fbd.patch('tournaments/' + id + '/info', { registration: !!merged.regKeyHash });
           }
-        } catch (e) { out.errors.push({ tournament: id, error: String((e && e.message) || e).slice(0, 200) }); }
+        } catch (e) { out.errors.push({ tournament: id, error: String((e && e.message) || e).slice(0, 200) }); }finally{if(release)await release();}
       }
       // 3. Canonical matches: insert missing replicas, set diverged replicas to canonical.
       // Nested layout: ids come from the practice + per-tournament nodes; the Postgres
@@ -1488,6 +1504,41 @@ async function handle(req, res) {
     const body = await readBody(req, 2e3);
     await store.tsetListed(t.id, !!(body && body.listed));
     return send(res, 200, { ok: true, listed: !!(body && body.listed) });
+  }
+  // Organiser-only roster additions. Uses existing canonical team CAS; never
+  // rewrites match configurations or recorded player/score history.
+  if ((mt = p.match(/^\/api\/tournaments\/([a-z0-9]{6,12})\/roster$/)) && req.method === 'POST') {
+    const t = await store.tget(mt[1]);
+    if (!t) return send(res, 404, { error: 'Tournament not found' });
+    if (!(await orgManage(req, t))) return send(res, 403, { error: 'Sign in as organiser with access to this tournament.' });
+    if (await orgResetBlocked(res)) return;
+    const body = await readBody(req);
+    if (!body || !['addPlayer','editPlayer'].includes(body.action)) return send(res,400,{error:'Unknown roster action'});
+    let prepared;
+      const name=engine.cleanName(body.name,24),empId=engine.cleanName(body.empId,24),dept=engine.cleanName(body.dept,24);
+      if(!name||!empId)return send(res,400,{error:'Enter a player name and employee ID.'});
+      if(publicNameProblem(name))return send(res,400,{error:PUBLIC_NAME_MSG});
+      prepared={name,empId,dept};
+    let problem=null;
+    const ok=await store.tmutateTeams(t.id,(teams)=>{
+      problem=null;
+      const next=teams.map(x=>({...x,players:x.players.map(pl=>({...pl}))}));
+      const team=next.find(x=>x.id===body.teamId);
+      if(!team){problem='Team not found. Refresh and try again.';return null;}
+      if(body.action==='addPlayer'){
+        if(team.players.length>=15){problem='A team can have at most 15 players.';return null;}
+        if(team.players.some(x=>x.name.toLowerCase()===prepared.name.toLowerCase()||String(x.empId||'').trim().toLowerCase()===prepared.empId.toLowerCase())){problem='That name or employee ID is already in this team.';return null;}
+        team.players.push({...prepared,role:''});return next;
+      }
+      const ix=body.player;
+      if(!Number.isInteger(ix)||!team.players[ix]||JSON.stringify(stableValue(team.players[ix]))!==JSON.stringify(stableValue(body.expectedPlayer))){
+        problem='Player changed on another device. Refresh before editing.';return null;
+      }
+      if(team.players.some((x,i)=>i!==ix&&(x.name.toLowerCase()===prepared.name.toLowerCase()||String(x.empId||'').trim().toLowerCase()===prepared.empId.toLowerCase()))){problem='That name or employee ID is already in this team.';return null;}
+      team.players[ix]={...team.players[ix],...prepared};return next;
+    });
+    if(problem||!ok)return send(res,409,{error:problem||'Tournament changed on another device. Refresh and try again.'});
+    return send(res,200,{ok:true});
   }
   if ((mt = p.match(/^\/api\/tournaments\/([a-z0-9]{6,12})\/teams$/)) && req.method === 'POST') {
     const ip = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
