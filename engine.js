@@ -50,9 +50,12 @@ function normalizeConfig(c) {
 }
 
 function mkInnings(cfg, i) {
-  const bat = i === 0 ? cfg.batFirst : 1 - cfg.batFirst;
+  const round = Math.floor(i / 2);
+  const first = round % 2 ? 1 - cfg.batFirst : cfg.batFirst;
+  const bat = i % 2 === 0 ? first : 1 - first;
   const bowl = 1 - bat;
   return {
+    superOver: round, phaseInnings: i % 2, maxBalls: round ? 6 : cfg.overs * 6, wicketLimit: round ? 2 : cfg.teams[bat].players.length - 1,
     bat, bowl, runs: 0, wkts: 0, balls: 0, extras: { wd: 0, nb: 0, b: 0, lb: 0 },
     batters: cfg.teams[bat].players.map(() => ({ runs: 0, balls: 0, fours: 0, sixes: 0, in: false, out: null })),
     order: [], bowlers: {}, fow: [], overs: [], cur: [], curRuns: 0, curLegal: 0, curTotal: 0,
@@ -81,10 +84,14 @@ function finishInnings(cfg, st, why) {
   const inn = st.innings[st.cur];
   if (inn.done) return;
   inn.done = true; inn.endedBy = why;
-  if (st.cur === 0) {
-    st.cur = 1; const n = mkInnings(cfg, 1); n.target = inn.runs + 1; st.innings.push(n);
+  if (st.cur % 2 === 0) {
+    st.cur += 1; const n = mkInnings(cfg, st.cur); n.target = inn.runs + 1; st.innings.push(n);
   } else {
-    const a = st.innings[0], b = st.innings[1];
+    const a = st.innings[st.cur - 1], b = st.innings[st.cur];
+    if (inn.superOver) {
+      st.result = b.runs === a.runs ? {winner:null,text:'Super Over '+inn.superOver+' tied',superOver:inn.superOver} : {winner:b.runs>a.runs?b.bat:a.bat,text:cfg.teams[b.runs>a.runs?b.bat:a.bat].name+' won in Super Over '+inn.superOver,superOver:inn.superOver};
+      return;
+    }
     const n2 = cfg.teams[b.bat].players.length;
     if (b.runs >= b.target) st.result = { winner: b.bat, text: cfg.teams[b.bat].name + ' won by ' + (n2 - 1 - b.wkts) + ' wicket' + ((n2 - 1 - b.wkts) === 1 ? '' : 's') };
     else if (b.runs === a.runs) st.result = { winner: null, text: 'Match tied' };
@@ -96,13 +103,41 @@ function checkEnd(cfg, st) {
   const inn = st.innings[st.cur];
   if (inn.done) return;
   const players = cfg.teams[inn.bat].players.length;
-  if (st.cur === 1 && inn.runs >= inn.target) return finishInnings(cfg, st, 'target');
-  if (inn.wkts >= players - 1) return finishInnings(cfg, st, 'allout');
-  if (inn.balls >= cfg.overs * 6) return finishInnings(cfg, st, 'overs');
+  if (st.cur % 2 === 1 && inn.runs >= inn.target) return finishInnings(cfg, st, 'target');
+  if (inn.wkts >= inn.wicketLimit) return finishInnings(cfg, st, 'allout');
+  if (inn.balls >= inn.maxBalls) return finishInnings(cfg, st, 'overs');
+}
+
+function superEligibility(cfg, st, team, round) {
+  const dismissed = new Set();
+  const blockedBowlers = new Set();
+  for (const inn of st.innings) {
+    if (!inn.superOver) continue;
+    if (inn.bat === team) inn.batters.forEach((b,p) => { if (b.out) dismissed.add(p); });
+    if (inn.superOver === round - 1 && inn.bowl === team) {
+      if (inn.bowler !== null) blockedBowlers.add(inn.bowler);
+      if (inn.lastBowler !== null) blockedBowlers.add(inn.lastBowler);
+      Object.keys(inn.bowlers).forEach(p => blockedBowlers.add(Number(p)));
+    }
+  }
+  return { batters: cfg.teams[team].players.map((_,p)=>p).filter(p=>!dismissed.has(p)), bowlers: cfg.teams[team].players.map((_,p)=>p).filter(p=>!blockedBowlers.has(p)) };
+}
+function superStartError(cfg, st) {
+  if (!st.result || st.result.winner !== null) return 'A Super Over can only start after a tied result';
+  const a = st.innings[st.cur - 1], b = st.innings[st.cur];
+  if (!a || !b || a.runs === null || b.runs === null || a.runs !== b.runs || !a.done || !b.done) return 'Both tied innings totals must be known';
+  const round = Math.floor(st.innings.length / 2);
+  for (let team=0;team<2;team++) {
+    const eligible = superEligibility(cfg, st, team, round);
+    if (eligible.batters.length < 3) return cfg.teams[team].name+' needs at least 3 eligible Super Over batters';
+    if (!eligible.bowlers.length) return cfg.teams[team].name+' has no eligible bowler for the next Super Over';
+  }
+  return null;
 }
 
 function validate(cfg, st, ev) {
   if (!ev || typeof ev !== 'object') return 'Bad event';
+  if (ev.t === 'superOver') return superStartError(cfg, st);
   if (st.result) return 'Match is finished';
   const inn = st.innings[st.cur];
   const needs = needsOf(st);
@@ -126,7 +161,7 @@ function validate(cfg, st, ev) {
     if(a!==null&&b!==null){const winner=a===b?null:(a>b?cfg.batFirst:1-cfg.batFirst);if(ev.winner!==winner)return 'Confirmed winner disagrees with totals';}
     return null;
   }
-  if (ev.t === 'end') return null;
+  if (ev.t === 'end') return inn.superOver ? 'A Super Over ends after 6 legal balls, 2 wickets or the target is reached' : null;
   if (ev.t === 'sel') {
     if (!needs.includes(ev.role)) return 'Not needed right now';
     const p = ev.player;
@@ -134,13 +169,15 @@ function validate(cfg, st, ev) {
     if (ev.role === 'bowler') {
       const bt = cfg.teams[inn.bowl].players;
       if (p < 0 || p >= bt.length) return 'Unknown player';
+      if (inn.superOver && !superEligibility(cfg, st, inn.bowl, inn.superOver).bowlers.includes(p)) return 'The previous Super Over bowler cannot bowl this Super Over';
       if (bt.length > 1 && p === inn.lastBowler) return 'Same bowler cannot bowl two overs in a row';
-      if (cfg.maxOversPerBowler && (inn.bowlers[p] ? inn.bowlers[p].balls : 0) >= cfg.maxOversPerBowler * 6) return 'This bowler has used the maximum overs';
+      if (!inn.superOver && cfg.maxOversPerBowler && (inn.bowlers[p] ? inn.bowlers[p].balls : 0) >= cfg.maxOversPerBowler * 6) return 'This bowler has used the maximum overs';
       return null;
     }
     const bt = cfg.teams[inn.bat].players;
     if (p < 0 || p >= bt.length) return 'Unknown player';
     if (inn.batters[p].in) return 'That player has already batted';
+    if (inn.superOver && !superEligibility(cfg, st, inn.bat, inn.superOver).batters.includes(p)) return 'A batter dismissed in an earlier Super Over cannot bat again';
     return null;
   }
   if (ev.t === 'ball') {
@@ -226,7 +263,10 @@ function replay(cfg, events) {
   const st = { innings: [mkInnings(cfg, 0)], cur: 0, result: null };
   for (const ev of events) {
     const inn = st.innings[st.cur];
-    if (ev.t === 'sel') {
+    if (ev.t === 'superOver') {
+      const error = superStartError(cfg, st); if (error) throw new Error(error);
+      st.cur = st.innings.length; st.innings.push(mkInnings(cfg, st.cur)); st.result = null;
+    } else if (ev.t === 'sel') {
       const p = ev.player;
       if (ev.role === 'bowler') inn.bowler = p;
       else {
@@ -260,16 +300,18 @@ function view(cfg, events) {
   const needs = needsOf(st);
   const mapInn = (inn, idx) => {
     const bp = cfg.teams[inn.bat].players, wp = cfg.teams[inn.bowl].players;
-    const maxBalls = cfg.overs * 6;
+    const maxBalls = inn.maxBalls;
+    const eligible = inn.superOver ? superEligibility(cfg, st, inn.bat, inn.superOver).batters : bp.map((_,p)=>p);
+    const eligibleBowlers = inn.superOver ? superEligibility(cfg, st, inn.bowl, inn.superOver).bowlers : wp.map((_,p)=>p);
     return {
-      idx, bat: inn.bat, bowl: inn.bowl, batName: cfg.teams[inn.bat].name, bowlName: cfg.teams[inn.bowl].name,
+      idx, superOver:inn.superOver, phaseInnings:inn.phaseInnings, maxBalls, wicketLimit:inn.wicketLimit, eligibleBowlers, bat: inn.bat, bowl: inn.bowl, batName: cfg.teams[inn.bat].name, bowlName: cfg.teams[inn.bowl].name,
       runs: inn.summary&&inn.runs===null?'?':inn.runs, wkts: inn.summary&&inn.wkts===null?'?':inn.wkts, balls: inn.balls, overs: inn.summary&&inn.summaryBalls===null?'?':oversText(inn.balls), done: inn.done, endedBy: inn.endedBy,
       summary:!!inn.summary, summaryBalls:inn.summary?inn.summaryBalls:undefined, detailsRecorded:!inn.summary,
       target: inn.target, extras: inn.summary?null:inn.extras, extrasTotal: inn.summary?null: inn.extras.wd + inn.extras.nb + inn.extras.b + inn.extras.lb,
       rr: inn.balls ? +(inn.runs * 6 / inn.balls).toFixed(2) : 0,
       striker: inn.striker, non: inn.non, bowler: inn.bowler,
       batting: (inn.summary?[]:inn.order).map((p) => ({ p, name: bp[p], ...inn.batters[p], out: inn.batters[p].out ? inn.batters[p].out.text : null, notOut: !inn.batters[p].out, onStrike: p === inn.striker, sr: inn.batters[p].balls ? Math.round(inn.batters[p].runs * 100 / inn.batters[p].balls) : 0 })),
-      yetToBat: (inn.summary?[]:bp).map((n, p) => ({ p, name: n })).filter((o) => !inn.batters[o.p].in),
+      yetToBat: (inn.summary?[]:bp).map((n, p) => ({ p, name: n })).filter((o) => !inn.batters[o.p].in && eligible.includes(o.p)),
       bowling: Object.keys(inn.bowlers).map(Number).map((p) => { const b = inn.bowlers[p]; return { p, name: wp[p], overs: oversText(b.balls), maidens: b.maidens, runs: b.runs, wkts: b.wkts, wd: b.wd, nb: b.nb, econ: b.balls ? +(b.runs * 6 / b.balls).toFixed(1) : 0, current: p === inn.bowler }; }),
       fow: inn.fow.map((f) => ({ ...f, name: bp[f.player] })),
       ballLog: inn.log.map((l) => ({ ov: l.ov, lb: l.lb, bowler: wp[l.bowler], striker: l.striker == null ? null : bp[l.striker], non: l.non == null ? null : bp[l.non], x: l.x, r: l.r, bat: l.bat, extra: l.extra, total: l.total, tok: l.tok, out: l.w ? { k: l.w.k, who: bp[l.w.who], f: l.w.f, text: l.w.text } : null, runs: l.runs, wkts: l.wkts })),
@@ -285,6 +327,7 @@ function view(cfg, events) {
   };
   return {
     cur: st.cur, result: st.result, needs, innings: st.innings.map(mapInn),
+    superOver: Math.floor(st.cur / 2), canStartSuperOver: !superStartError(cfg, st), superOverStartError: st.result && st.result.winner === null ? superStartError(cfg, st) : null,
     lastBall: events.length,
   };
 }
