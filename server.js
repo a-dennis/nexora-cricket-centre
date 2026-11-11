@@ -1017,7 +1017,7 @@ function registeredTeamRefs(m, t) {
 function summary(m, tournament) {
   const st = engine.view(m.config, m.events);
   return { id: m.id, title: m.config.title, date: m.config.date || null, teams: m.config.teams.map((t) => t.name), teamRefs: registeredTeamRefs(m, tournament),
-    innings: st.innings.filter((i) => i.balls > 0 || i.summary).map((i) => ({ team: i.batName, runs: i.runs, wkts: i.wkts, overs: i.overs })),
+    innings: st.innings.filter((i) => i.balls > 0 || i.summary || i.done || i.ballLog.length).map((i) => ({ team: i.batName, runs: i.runs, wkts: i.wkts, overs: i.overs, superOver: i.superOver, phaseInnings: i.phaseInnings })),
     result: st.result ? st.result.text : null, status: m.events.length === 0 ? 'new' : (st.result ? 'done' : 'live') };
 }
 const bad = new Map();
@@ -1183,7 +1183,7 @@ async function handle(req, res) {
     }
     if (p === '/api/backup' && req.method === 'GET') {
       const [ms, ts] = [await store.allMatches(), await store.allTournaments()];
-      return send(res, 200, { format: 'cricket-backup', version: 1, exportedAt: new Date().toISOString(), storage: store.kind,
+      return send(res, 200, { format: 'cricket-backup', version: ms.some(m=>(m.events||[]).some(e=>e.t==='superOver'))?2:1, exportedAt: new Date().toISOString(), storage: store.kind,
         counts: { matches: ms.length, tournaments: ts.length }, tournaments: ts, matches: ms });
     }
     if (p === '/api/admin/firebase-migrate' && req.method === 'POST') {
@@ -1269,7 +1269,7 @@ async function handle(req, res) {
     }
     if (p === '/api/restore' && req.method === 'POST') {
       const body = await readBody(req, 5e6);
-      if (!body || body.format !== 'cricket-backup' || body.version !== 1 || !Array.isArray(body.matches) || !Array.isArray(body.tournaments)) return send(res, 400, { error: 'Not a valid backup file' });
+      if (!body || body.format !== 'cricket-backup' || ![1,2].includes(body.version) || !Array.isArray(body.matches) || !Array.isArray(body.tournaments)) return send(res, 400, { error: 'Not a valid backup file' });
       const idOk = (x) => typeof x === 'string' && /^[a-z0-9]{6,12}$/.test(x), hashOk = (x) => typeof x === 'string' && /^[a-f0-9]{64}$/.test(x);
       const out = { tournaments: { added: 0, skipped: 0, rejected: 0 }, matches: { added: 0, skipped: 0, rejected: 0 } };
       for (const t of body.tournaments) {
@@ -1385,7 +1385,7 @@ async function handle(req, res) {
     const m = await store.get(mt[1]);
     if (!m) return send(res, 404, { error: 'Match not found' });
     if (!(await canManageMatchMedia(req,m))) { noteBad(ip); return send(res, 403, { error: 'An approved media device or organiser access is required for match backups.' }); }
-    return send(res, 200, { format: 'cricket-backup', version: 1, exportedAt: new Date().toISOString(), storage: store.kind, counts: { matches: 1, tournaments: 0 }, tournaments: [], matches: [{ id: m.id, config: m.config, events: m.events, keyHash: m.keyHash, rev: m.rev, updated: m.updated }] });
+    return send(res, 200, { format: 'cricket-backup', version: m.events.some(e=>e.t==='superOver')?2:1, exportedAt: new Date().toISOString(), storage: store.kind, counts: { matches: 1, tournaments: 0 }, tournaments: [], matches: [{ id: m.id, config: m.config, events: m.events, keyHash: m.keyHash, rev: m.rev, updated: m.updated }] });
   }
   if ((mt = p.match(/^\/api\/tournaments\/([a-z0-9]{6,12})\/backup$/)) && req.method === 'GET') {
     const ip = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
@@ -1395,7 +1395,7 @@ async function handle(req, res) {
     if (!(await orgManage(req, t))) { noteBad(ip); return send(res, 403, { error: 'Sign in as organiser on the device holding this tournament organiser link.' }); }
     if (await orgResetBlocked(res)) return;
     const ms = await store.byTournament(t.id);
-    return send(res, 200, { format: 'cricket-backup', version: 1, exportedAt: new Date().toISOString(), storage: store.kind, counts: { matches: ms.length, tournaments: 1 }, tournaments: [{ id: t.id, name: t.name, keyHash: t.keyHash, teams: cleanStoredTeams(t.teams), regKeyHash: t.regKeyHash || null }], matches: ms.map((m) => ({ id: m.id, config: m.config, events: m.events, keyHash: m.keyHash, rev: m.rev, updated: m.updated })) });
+    return send(res, 200, { format: 'cricket-backup', version: ms.some(m=>m.events.some(e=>e.t==='superOver'))?2:1, exportedAt: new Date().toISOString(), storage: store.kind, counts: { matches: ms.length, tournaments: 1 }, tournaments: [{ id: t.id, name: t.name, keyHash: t.keyHash, teams: cleanStoredTeams(t.teams), regKeyHash: t.regKeyHash || null }], matches: ms.map((m) => ({ id: m.id, config: m.config, events: m.events, keyHash: m.keyHash, rev: m.rev, updated: m.updated })) });
   }
   if ((mt = p.match(/^\/api\/tournaments\/([a-z0-9]{6,12})\/team-details$/)) && req.method === 'GET') {
     if (mt[1] !== PUBLIC_DETAIL_TOURNAMENT) return send(res, 404, {error:'Team details are not public for this tournament.'});
@@ -1646,7 +1646,7 @@ async function handle(req, res) {
       if(ev&&ev.t==='completedSummary'&&events.length)return send(res,400,{error:'Completed summary requires a match with no recorded events. Existing events were preserved.'});
       const er = engine.validate(m.config, st, ev);
       if (er) return send(res, 400, { error: er });
-      const clean = ev.t==='summary'?{t:'summary',runs:ev.runs,wkts:ev.wkts,balls:ev.balls}:ev.t === 'completedSummary' ? {t:'completedSummary',innings:ev.innings.map(x=>({runs:x.runs,wkts:x.wkts,balls:x.balls})),winner:ev.winner} : ev.t === 'sel' ? { t: 'sel', role: ev.role, player: ev.player }
+      const clean = ev.t==='superOver'?{t:'superOver'}:ev.t==='summary'?{t:'summary',runs:ev.runs,wkts:ev.wkts,balls:ev.balls}:ev.t === 'completedSummary' ? {t:'completedSummary',innings:ev.innings.map(x=>({runs:x.runs,wkts:x.wkts,balls:x.balls})),winner:ev.winner} : ev.t === 'sel' ? { t: 'sel', role: ev.role, player: ev.player }
         : ev.t === 'ball' ? Object.assign({ t: 'ball', r: ev.r, x: ev.x || '' }, ev.w ? { w: { k: ev.w.k, who: ev.w.who, f: engine.cleanName(ev.w.f, 24) } } : {})
         : { t: 'end' };
       events.push(clean);
