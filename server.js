@@ -806,6 +806,13 @@ async function savedOrgTournament(req, t) {
   return !!(t && await validOrgSession(req.headers['x-org-session']) &&
     (await store.getSetting('orgtour_'+t.id)) === t.keyHash);
 }
+
+// Named secured session management: a valid signed-in session PLUS this
+// tournament's current ownership fingerprint (orgtour_) manages the tournament
+// from any device, without the raw key on that device. Raw-key auth unchanged.
+async function orgManage(req, t) {
+  return (await orgAuthed(req, t)) || (await savedOrgTournament(req, t));
+}
 // Organiser mutations need BOTH a signed-in session and the tournament's organiser
 // link on the request - a link alone (or a login alone) mutates nothing.
 async function orgAuthed(req, t) {
@@ -1370,7 +1377,7 @@ async function handle(req, res) {
     if (badAuth(ip)) return send(res, 429, { error: 'Too many failed attempts. Try again later.' });
     const t = await store.tget(mt[1]);
     if (!t) return send(res, 404, { error: 'Tournament not found' });
-    if (!(await orgAuthed(req, t))) { noteBad(ip); return send(res, 403, { error: 'Sign in as organiser on the device holding this tournament organiser link.' }); }
+    if (!(await orgManage(req, t))) { noteBad(ip); return send(res, 403, { error: 'Sign in as organiser on the device holding this tournament organiser link.' }); }
     if (await orgResetBlocked(res)) return;
     const ms = await store.byTournament(t.id);
     return send(res, 200, { format: 'cricket-backup', version: 1, exportedAt: new Date().toISOString(), storage: store.kind, counts: { matches: ms.length, tournaments: 1 }, tournaments: [{ id: t.id, name: t.name, keyHash: t.keyHash, teams: cleanStoredTeams(t.teams), regKeyHash: t.regKeyHash || null }], matches: ms.map((m) => ({ id: m.id, config: m.config, events: m.events, keyHash: m.keyHash, rev: m.rev, updated: m.updated })) });
@@ -1392,10 +1399,18 @@ async function handle(req, res) {
     const resp = { id: t.id, name: t.name, listed: !!t.listed, matches: ms.map(m => summary(m, t)),
       teams: teams.filter((x) => x.status === 'approved').map((x) => ({ id: x.id, name: x.name, players: x.players.map((p) => p.name + (p.role === 'c' ? ' (C)' : p.role === 'vc' ? ' (VC)' : '')) })) };
     const orgKey = req.headers['x-org-key'];
+    let privileged = false;
     if (orgKey) {
       const ip = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
       if (badAuth(ip)) return send(res, 429, { error: 'Too many failed attempts. Try again later.' });
       if (!keyEq(orgKey, t.keyHash)) { noteBad(ip); return send(res, 403, { error: 'Not allowed' }); }
+      privileged = true;
+    } else if (await savedOrgTournament(req, t)) {
+      // Signed-in session with the current ownership fingerprint: the console's
+      // private team/registration view without the raw key on this device.
+      privileged = true;
+    }
+    if (privileged) {
       resp.registration = t.regKeyHash ? 'open' : 'closed';
       resp.pendingTeams = teams.filter((x) => x.status === 'pending').map((x) => ({ id: x.id, name: x.name, players: x.players }));
       resp.approvedTeams = teams.filter((x) => x.status === 'approved').map((x) => ({ id: x.id, name: x.name, players: x.players }));
@@ -1407,7 +1422,7 @@ async function handle(req, res) {
     if (badAuth(ip)) return send(res, 429, { error: 'Too many failed attempts. Try again later.' });
     const t = await store.tget(mt[1]);
     if (!t) return send(res, 404, { error: 'Tournament not found' });
-    if (!(await orgAuthed(req, t))) { noteBad(ip); return send(res, 403, { error: 'Sign in as organiser on the device holding this tournament organiser link.' }); }
+    if (!(await orgManage(req, t))) { noteBad(ip); return send(res, 403, { error: 'Sign in as organiser on the device holding this tournament organiser link.' }); }
     if (await orgResetBlocked(res)) return;
     const body = await readBody(req, 2e3);
     const rk = String(body && body.regKey || '');
@@ -1428,6 +1443,11 @@ async function handle(req, res) {
     if (await orgResetBlocked(res)) return;
     const t = await store.tget(mt[1]);
     if (!t) return send(res, 404, { error: 'Tournament not found' });
+    // Bounded ownership: minting needs this tournament's CURRENT ownership
+    // fingerprint (orgtour_) - created by the gold save-online button (raw-key
+    // proof) or a server-side owner action. A bare session cannot mint any
+    // arbitrary tournament.
+    if ((await store.getSetting('orgtour_' + t.id)) !== t.keyHash) return send(res, 403, { error: 'Save this tournament access online first (from the device holding its private organiser link).' });
     const key = rnd(14);
     const h = sha(key);
     if (!(await store.tsetKey(t.id, h))) return send(res, 500, { error: 'Could not create the link. Try again.' });
@@ -1440,7 +1460,7 @@ async function handle(req, res) {
     if (badAuth(ip)) return send(res, 429, { error: 'Too many failed attempts. Try again later.' });
     const t = await store.tget(mt[1]);
     if (!t) return send(res, 404, { error: 'Tournament not found' });
-    if (!(await orgAuthed(req, t))) { noteBad(ip); return send(res, 403, { error: 'Sign in as organiser on the device holding this tournament organiser link.' }); }
+    if (!(await orgManage(req, t))) { noteBad(ip); return send(res, 403, { error: 'Sign in as organiser on the device holding this tournament organiser link.' }); }
     if (await orgResetBlocked(res)) return;
     const body = await readBody(req, 2e3);
     await store.tsetListed(t.id, !!(body && body.listed));
@@ -1472,7 +1492,7 @@ async function handle(req, res) {
     if (badAuth(ip)) return send(res, 429, { error: 'Too many failed attempts. Try again later.' });
     const t = await store.tget(mt[1]);
     if (!t) return send(res, 404, { error: 'Tournament not found' });
-    if (!(await orgAuthed(req, t))) { noteBad(ip); return send(res, 403, { error: 'Sign in as organiser on the device holding this tournament organiser link.' }); }
+    if (!(await orgManage(req, t))) { noteBad(ip); return send(res, 403, { error: 'Sign in as organiser on the device holding this tournament organiser link.' }); }
     if (await orgResetBlocked(res)) return;
     const body = await readBody(req, 2e3);
     let notFound = false, badAction = false, badPlayer = false;
@@ -1505,7 +1525,7 @@ async function handle(req, res) {
     const body = await readBody(req);
     const t = await store.tget(String(body.tournament || ''));
     if (!t) return send(res, 404, { error: 'Tournament not found' });
-    if (!(await orgAuthed(req, t))) return send(res, 403, { error: 'Sign in as organiser on the device holding this tournament organiser link.' });
+    if (!(await orgManage(req, t))) return send(res, 403, { error: 'Sign in as organiser on the device holding this tournament organiser link.' });
     if (await orgResetBlocked(res)) return;
     if (m.config.tid && m.config.tid !== t.id) return send(res, 409, { error: 'This match already belongs to a tournament.' });
     if (!m.config.tid && (await store.byTournament(t.id)).length >= MAX_PER_TOURNAMENT) return send(res, 507, { error: 'Tournament is full.' });

@@ -634,7 +634,7 @@ function downloadImage(){
   },'image/png');
 }
 
-document.addEventListener('click',function(e){if(e.target&&e.target.id==='dlrep')downloadReport();if(e.target&&e.target.id==='dlimg')downloadImage();if(e.target&&e.target.id==='dlbk')dlBackup('/api/matches/'+id+'/backup',Object.assign({'x-scorer-key':key||''},(function(){var d=null;try{d=localStorage.getItem('sdev_'+id)}catch(e){};return d?{'x-scorer-device':d}:{}})(),orgSess()?{'x-org-session':orgSess()}:{}),'match-backup-'+id);if(e.target&&e.target.id==='dltb'){var o=tList().filter(function(t){return t.id===id})[0];if(o)dlBackup('/api/tournaments/'+id+'/backup',{'x-org-key':o.key},'tournament-backup-'+id)}});
+document.addEventListener('click',function(e){if(e.target&&e.target.id==='dlrep')downloadReport();if(e.target&&e.target.id==='dlimg')downloadImage();if(e.target&&e.target.id==='dlbk')dlBackup('/api/matches/'+id+'/backup',Object.assign({'x-scorer-key':key||''},(function(){var d=null;try{d=localStorage.getItem('sdev_'+id)}catch(e){};return d?{'x-scorer-device':d}:{}})(),orgSess()?{'x-org-session':orgSess()}:{}),'match-backup-'+id);if(e.target&&e.target.id==='dltb'){var o=tList().filter(function(t){return t.id===id})[0];dlBackup('/api/tournaments/'+id+'/backup',o?{'x-org-key':o.key}:{'x-org-session':orgSess()},'tournament-backup-'+id)}});
 function dlBackup(url,hd,nm){
   fetch(url,{headers:hd}).then(function(r){return r.json().then(function(j){if(!r.ok){toast(j.error||'Could not download');return}
     var b=new Blob([JSON.stringify(j,null,1)],{type:'application/json'}),a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=nm+'-'+todayStr()+'.json';document.body.appendChild(a);a.click();setTimeout(function(){URL.revokeObjectURL(a.href);a.remove()},1500);toast('Backup downloaded',1)})},function(){toast('Network problem. Try again.')});
@@ -1040,7 +1040,7 @@ function showTour(j){
 function loadT(first){
   if(document.hidden&&!first)return;
   var ownK=tList().filter(function(t){return t.id===id})[0];
-  fetch('/api/tournaments/'+id,{headers:ownK?{'x-org-key':ownK.key}:{}}).then(function(r){return r.json().then(function(j){return{ok:r.ok,j:j}})}).then(function(r){
+  api('GET','/api/tournaments/'+id,null,ownK?ownK.key:null).then(function(r){
     if(!r.ok){err=r.j.error||'Error';if(!T)renderT();return}
     err=null;var sig=JSON.stringify(r.j);if(T&&T._sig===sig)return;T=r.j;T._sig=sig;
     if(T&&T.name&&!tList().some(function(t){return t.id===id}))vSave({id:id,name:T.name});
@@ -1066,16 +1066,18 @@ function renderT(){
   h+=lkRow('Live scores & calendar','/t/'+id,{share:true});
   h+=lkRow('Grand opening ceremony','/launch',{share:true});
   var ownL=tList().filter(function(t){return t.id===id})[0];
-  if(ownL){
+  var sessOwn=!ownL&&T.pendingTeams!==undefined;
+  if(ownL||sessOwn){
     h+='<div class="lkgrp">Only you see these (organiser device)</div>';
-    if(T.registration==='open'&&ownL.regKey)h+=lkRow('Captain team entry','/r/'+id+'#r='+ownL.regKey,{share:true});
+    if(T.registration==='open'&&ownL&&ownL.regKey)h+=lkRow('Captain team entry','/r/'+id+'#r='+ownL.regKey,{share:true});
     else if(T.registration==='open')h+='<div class="mut" style="margin-top:8px;font-size:12.5px">Captain registration is open, but its link is saved on the device that created it. You can make a new one under Team registrations below.</div>';
     else h+='<div class="mut" style="margin-top:8px;font-size:12.5px">Captain registration link not created yet - make one under Team registrations below.</div>';
 
     var sks=(T.matches||[]).map(function(m){var k=null;try{k=localStorage.getItem('ck_'+m.id)}catch(e){}return k?{id:m.id,title:m.title,key:k}:null}).filter(Boolean);
     if(sks.length)h+=sks.map(function(s){return lkRow('Scorer link - '+s.title,'/m/'+s.id+'#k='+s.key)}).join('');
     else h+='<div class="mut" style="margin-top:8px;font-size:12.5px">Scorer links are saved on the device that created each match - a new match shows its scorer link once, at creation.</div>';
-    h+=lkRow('Private organiser link','/t/'+id+'#o='+ownL.key,{noOpen:true});
+    if(ownL)h+=lkRow('Private organiser link','/t/'+id+'#o='+ownL.key,{noOpen:true});
+    else h+='<button class="btn sec" id="mintorg" style="margin-top:8px">Create a new private organiser link (old ones stop working)</button>';
     h+='<div class="mut" style="font-size:12.5px;margin-top:6px">Keep the organiser and scorer links private - anyone with them can control the tournament. The registration link is the one to send captains.</div>';
   }
   h+='</div>';
@@ -1085,13 +1087,13 @@ function renderT(){
   for(var d=1;d<=dim;d++){var ds=y+'-'+pad2(mo+1)+'-'+pad2(d),n=(by[ds]||[]).length;
     h+='<button class="day'+(n?' has':'')+(ds===selDay?' sel':'')+(ds===today?' today':'')+'" data-d="'+ds+'" aria-label="'+d+' '+MON[mo]+(n?', '+n+' match'+(n>1?'es':''):'')+'">'+d+(n?'<i>'+n+'</i>':'')+'</button>'}
   h+='</div></div></div><div class="tr">';
-  var list=selDay?(by[selDay]||[]):null,own=tList().filter(function(t){return t.id===id})[0];
+  var list=selDay?(by[selDay]||[]):null,own=tList().filter(function(t){return t.id===id})[0];var manage=own||sessOwn;
   if(selDay){h+='<h1>'+niceDate(selDay)+'</h1>'+(list.length?list.map(matchCard).join(''):'<div class="card mut">No matches on this date.</div>')}
   else{var mm2=T.matches.filter(function(m){return m.date&&m.date.slice(0,7)===ym}).sort(function(a,b){return a.date<b.date?1:-1});h+='<h1>'+MON[mo]+' '+y+'</h1>'+(mm2.length?mm2.map(matchCard).join(''):'<div class="card mut">No matches this month.</div>')}
   if(T.teams&&T.teams.length){h+='<h1>Teams</h1>'+T.teams.map(function(tm){return '<div class="card"><b>'+esc(tm.name)+'</b><div class="mut" style="margin-top:4px">'+tm.players.map(esc).join(', ')+'</div></div>'}).join('')}
-  if(own){
+  if(manage){
     h+='<h1>Team registrations</h1><div class="card"><div class="mut">Share one link with all team captains. Each captain enters their team name and players. You approve a team before it shows in the app.</div>';
-    if(T.registration==='open'&&!own.regKey)h+='<div class="mut" style="margin-top:8px">Registration is open. The link is on the device that created it, or make a new one here.</div>';
+    if(T.registration==='open'&&!(own&&own.regKey))h+='<div class="mut" style="margin-top:8px">Registration is open. The link is on the device that created it, or make a new one here.</div>';
     h+='<button class="btn sec" id="nreg" style="margin-top:10px">'+(T.registration==='open'?'Create new link (disables the old one)':'Create registration link')+'</button>';
     var pend=T.pendingTeams||[];
     h+='<h1>Waiting for approval ('+pend.length+')</h1>';
@@ -1100,19 +1102,20 @@ function renderT(){
     if(tapp.length){h+='<h1>Approved teams &amp; player details (only you see this)</h1>'+tapp.map(function(tm){return '<div class="preg"><b class="fire">'+esc(tm.name)+'</b><div style="margin-top:2px">'+tm.players.map(function(p,pi2){return '<div class="plrow"><span class="pn">'+esc(p.name)+'</span><span class="mut pdp">'+(p.dept?esc(p.dept):'—')+'</span><span class="mut pid">'+(p.empId?'ID: '+esc(p.empId):'')+'</span><button class="rlbtn sm'+(p.role==='c'?' on':'')+'" data-rlm="'+esc(tm.id)+':'+pi2+':c">C</button><button class="rlbtn sm'+(p.role==='vc'?' on':'')+'" data-rlm="'+esc(tm.id)+':'+pi2+':vc">VC</button></div>'}).join('')+'</div></div>'}).join('')}
     h+='</div>';
   }
-  if(own)h+='<button class="btn pri" id="addm" style="margin-top:6px">Add a match</button><button class="btn sec" id="tgl" style="margin-top:10px">'+(T.listed?'Hide from home Viewer tab':'Show on home Viewer tab')+'</button><div class="mut" style="font-size:12.5px;margin-top:6px">'+(T.listed?'On: anyone who opens the app or website sees live scores for this tournament on the home Viewer tab.':'Off: only people with the calendar link can find this tournament. Turn this on so viewers see scores from the home Viewer tab, no link needed.')+'</div><button class="btn sec" id="dltb" style="margin-top:10px">Download tournament backup (file)</button>';
+  if(manage)h+='<button class="btn pri" id="addm" style="margin-top:6px">Add a match</button><button class="btn sec" id="tgl" style="margin-top:10px">'+(T.listed?'Hide from home Viewer tab':'Show on home Viewer tab')+'</button><div class="mut" style="font-size:12.5px;margin-top:6px">'+(T.listed?'On: anyone who opens the app or website sees live scores for this tournament on the home Viewer tab.':'Off: only people with the calendar link can find this tournament. Turn this on so viewers see scores from the home Viewer tab, no link needed.')+'</div><button class="btn sec" id="dltb" style="margin-top:10px">Download tournament backup (file)</button>';
   h+='</div></div>'+FOOT;app.innerHTML=h;
   document.getElementById('pm').onclick=function(){shiftMonth(-1)};document.getElementById('nm').onclick=function(){shiftMonth(1)};
   Array.prototype.forEach.call(document.querySelectorAll('.day'),function(b){b.onclick=function(){selDay=selDay===b.dataset.d?null:b.dataset.d;renderT()}});
   var a=document.getElementById('addm');if(a)a.onclick=function(){location.href='/?t='+id};
-  var tg=document.getElementById('tgl');if(tg&&own)tg.onclick=function(){tg.disabled=true;api('POST','/api/tournaments/'+id+'/listed',{listed:!T.listed},own.key).then(function(r){tg.disabled=false;if(!r.ok){toast(r.j.error||'Could not update');return}T.listed=!T.listed;toast(T.listed?'Now showing on the home Viewer tab':'Hidden from the home Viewer tab',1);renderT()}).catch(function(){tg.disabled=false;toast('No connection. Try again.')})};
-  var nr=document.getElementById('nreg');if(nr&&own)nr.onclick=function(){nr.disabled=true;var rk=randKey(14);
-    api('POST','/api/tournaments/'+id+'/reglink',{regKey:rk},own.key).then(function(r){nr.disabled=false;
+  var tg=document.getElementById('tgl');if(tg&&manage)tg.onclick=function(){tg.disabled=true;api('POST','/api/tournaments/'+id+'/listed',{listed:!T.listed},(own?own.key:null)).then(function(r){tg.disabled=false;if(!r.ok){toast(r.j.error||'Could not update');return}T.listed=!T.listed;toast(T.listed?'Now showing on the home Viewer tab':'Hidden from the home Viewer tab',1);renderT()}).catch(function(){tg.disabled=false;toast('No connection. Try again.')})};
+  var nr=document.getElementById('nreg');if(nr&&manage)nr.onclick=function(){nr.disabled=true;var rk=randKey(14);
+    api('POST','/api/tournaments/'+id+'/reglink',{regKey:rk},(own?own.key:null)).then(function(r){nr.disabled=false;
       if(!r.ok){toast(r.j.error||'Could not create link');return}
       tSetReg(id,rk);loadT(true);toast('Registration link ready - copy and share it',1)}).catch(function(){nr.disabled=false;toast('No connection. Try again.')})};
-  Array.prototype.forEach.call(document.querySelectorAll('[data-tap]'),function(b){b.onclick=function(){b.disabled=true;api('POST','/api/tournaments/'+id+'/teams/'+b.dataset.tap,{action:'approve'},own.key).then(function(r){b.disabled=false;if(!r.ok){toast(r.j.error||'Could not approve');return}toast('Team approved',1);loadT(true)}).catch(function(){b.disabled=false;toast('No connection. Try again.')})}});
-  Array.prototype.forEach.call(document.querySelectorAll('[data-trm]'),function(b){b.onclick=function(){if(!confirm('Remove this team?'))return;api('POST','/api/tournaments/'+id+'/teams/'+b.dataset.trm,{action:'remove'},own.key).then(function(r){if(!r.ok){toast(r.j.error||'Could not remove');return}toast('Team removed',1);loadT(true)}).catch(function(){toast('No connection. Try again.')})}});
-  Array.prototype.forEach.call(document.querySelectorAll('[data-rlm]'),function(b){b.onclick=function(){var pr=b.getAttribute('data-rlm').split(':');b.disabled=true;api('POST','/api/tournaments/'+id+'/teams/'+pr[0],{action:'role',player:+pr[1],role:pr[2]},own.key).then(function(r){b.disabled=false;if(!r.ok){toast(r.j.error||'Could not update');return}loadT(true)}).catch(function(){b.disabled=false;toast('No connection. Try again.')})}});
+  Array.prototype.forEach.call(document.querySelectorAll('[data-tap]'),function(b){b.onclick=function(){b.disabled=true;api('POST','/api/tournaments/'+id+'/teams/'+b.dataset.tap,{action:'approve'},(own?own.key:null)).then(function(r){b.disabled=false;if(!r.ok){toast(r.j.error||'Could not approve');return}toast('Team approved',1);loadT(true)}).catch(function(){b.disabled=false;toast('No connection. Try again.')})}});
+  Array.prototype.forEach.call(document.querySelectorAll('[data-trm]'),function(b){b.onclick=function(){if(!confirm('Remove this team?'))return;api('POST','/api/tournaments/'+id+'/teams/'+b.dataset.trm,{action:'remove'},(own?own.key:null)).then(function(r){if(!r.ok){toast(r.j.error||'Could not remove');return}toast('Team removed',1);loadT(true)}).catch(function(){toast('No connection. Try again.')})}});
+  Array.prototype.forEach.call(document.querySelectorAll('[data-rlm]'),function(b){b.onclick=function(){var pr=b.getAttribute('data-rlm').split(':');b.disabled=true;api('POST','/api/tournaments/'+id+'/teams/'+pr[0],{action:'role',player:+pr[1],role:pr[2]},(own?own.key:null)).then(function(r){b.disabled=false;if(!r.ok){toast(r.j.error||'Could not update');return}loadT(true)}).catch(function(){b.disabled=false;toast('No connection. Try again.')})}});
+  var mo2=document.getElementById('mintorg');if(mo2)mo2.onclick=function(){mo2.disabled=true;api('POST','/api/tournaments/'+id+'/organiser-link',{}).then(function(r){mo2.disabled=false;if(!r.ok){toast(r.j.error||'Could not create the link');return}tSave({id:id,name:T.name,key:r.j.orgKey});copyTxt(location.origin+'/t/'+id+'#o='+r.j.orgKey);toast('New private organiser link copied - keep it private',1);loadT(true)}).catch(function(){mo2.disabled=false;toast('No connection. Try again.')})};
 }
 function videoCard(){
   if(mode!=='s'||!S||!hasScoring())return'';
