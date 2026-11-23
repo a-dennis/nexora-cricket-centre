@@ -893,18 +893,6 @@ async function loginNoteFail(ip) {
   else await loginLockSet(ip, { fails, until: 0 });
 }
 async function loginNoteOk(ip) { await loginLockSet(ip, null); }
-// Typed public names land in world-readable Firebase records. Reject obvious
-// employee-ID / email / phone shapes. Heuristic only - not a personal-data detector.
-function publicNameProblem(s) {
-  const v = String(s || '');
-  if (/@/.test(v)) return 'looks like an email address';
-  if (/(?:\+?\d[\d\s().-]{6,}\d)/.test(v)) return 'looks like a phone number';
-  if (/^\d{4,}$/.test(v.trim())) return 'looks like an ID number';
-  if (/\b(emp|employee|id)\s*[:#-]?\s*[a-z]*\d{3,}\b/i.test(v)) return 'looks like an ID number';
-  return null;
-}
-const PUBLIC_NAME_MSG = 'Visible to everyone. Do not enter phone numbers or private details.';
-
 // Scorer links grant scores and undo for THIS match only, without a device approval.
 // Video and private backups retain the existing approved-device or owner check.
 // Organiser access still requires a signed-in session and proven ownership.
@@ -996,7 +984,6 @@ function cleanTeamReg(body) {
     else if (pl.role === 'vc') { if (seenV) pl.role = ''; else seenV = true; }
   }
   if (!name) return { error: 'Enter a team name' };
-  if (publicNameProblem(name) || players.some((pl) => publicNameProblem(pl.name))) return { error: PUBLIC_NAME_MSG };
   if (players.length < MIN_TEAM_PLAYERS) return { error: 'Add at least ' + MIN_TEAM_PLAYERS + ' players with their employee IDs' };
   if (players.length > 15) return { error: 'A team can have at most 15 players' };
   return { name, players };
@@ -1318,7 +1305,6 @@ async function handle(req, res) {
     const body = await readBody(req);
     const name = engine.cleanName(body.name, 40);
     if (!name) return send(res, 400, { error: 'Enter a tournament name' });
-    if (publicNameProblem(name)) return send(res, 400, { error: PUBLIC_NAME_MSG });
     const id = rnd(8).toLowerCase(), key = rnd(14);
     const committed = await store.tcreate({ id, name, keyHash: sha(key) });
     await store.setSetting('orgtour_' + id, sha(key));
@@ -1517,7 +1503,6 @@ async function handle(req, res) {
     let prepared;
       const name=engine.cleanName(body.name,24),empId=engine.cleanName(body.empId,24),dept=engine.cleanName(body.dept,24);
       if(!name||!empId)return send(res,400,{error:'Enter a player name and employee ID.'});
-      if(publicNameProblem(name))return send(res,400,{error:PUBLIC_NAME_MSG});
       prepared={name,empId,dept};
     let problem=null;
     const ok=await store.tmutateTeams(t.id,(teams)=>{
@@ -1634,9 +1619,6 @@ async function handle(req, res) {
     if ((await store.count()) >= MAX_MATCHES) return send(res, 507, { error: 'Storage limit reached for the free trial.' });
     const body = await readBody(req);
     const config = engine.normalizeConfig(body);
-    // Names typed here land in world-readable Firebase records (PUBLIC_NAME_MSG).
-    const nameFields = [config.title].concat(config.teams.map((t) => t.name), ...config.teams.map((t) => t.players));
-    if (nameFields.some((s) => publicNameProblem(s))) return send(res, 400, { error: PUBLIC_NAME_MSG });
     config.date = cleanDate(body.date);
     if (body.tournament) {
       // Tournament-linked create needs the canonical roster to authorise and de-dupe.
