@@ -282,7 +282,9 @@ function replay(cfg, events) {
       st.innings=[mkInnings(cfg,0),mkInnings(cfg,1)];
       st.innings.forEach((x,j)=>{const q=ev.innings[j];x.runs=q.runs;x.wkts=q.wkts;x.balls=q.balls===null?0:q.balls;x.summary=true;x.summaryBalls=q.balls;x.done=true;x.endedBy='summary';});
       st.cur=1;st.innings[1].target=ev.innings[0].runs===null?null:ev.innings[0].runs+1;
-      st.result={winner:ev.winner,text:ev.winner===null?'Match tied':cfg.teams[ev.winner].name+' won the match',summary:true};
+      // Firebase omits null object fields. A stored summary without winner is a tie.
+      const winner=ev.winner==null?null:ev.winner;
+      st.result={winner,text:winner===null?'Match tied':cfg.teams[winner].name+' won the match',summary:true};
     } else if (ev.t === 'ball') applyBall(cfg, st, ev);
     else if (ev.t === 'end') {
       // flush a partial over into history so scorecards stay complete

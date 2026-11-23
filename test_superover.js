@@ -13,3 +13,14 @@ const c2=E.normalizeConfig({...cfg,teams:cfg.teams.map(t=>({...t,players:t.playe
 const c3=E.normalizeConfig({...cfg,teams:cfg.teams.map(t=>({...t,players:t.players.slice(0,3)}))});let ev=tied.concat({t:'superOver'},{t:'sel',role:'striker',player:0},{t:'sel',role:'non',player:1},{t:'sel',role:'bowler',player:0},{t:'ball',r:0,w:{k:'bowled',who:'s'}},{t:'sel',role:'newbat',player:2},...Array.from({length:5},()=>({t:'ball',r:0})),{t:'sel',role:'striker',player:0},{t:'sel',role:'non',player:1},{t:'sel',role:'bowler',player:0},...Array.from({length:6},()=>({t:'ball',r:0})));
 ok(E.validate(c3,E.replay(c3,ev),{t:'superOver'}).includes('3 eligible'),'repeat batters depleted');
 console.log(checks+' Super Over engine assertions PASS');
+
+// Firebase drops null winner fields on a completed-summary round trip.
+const omitted=tied.map(({winner,...rest})=>rest);
+const omittedBefore=JSON.stringify(omitted);
+ok(JSON.stringify(E.view(cfg,omitted))===JSON.stringify(E.view(cfg,tied)),'Firebase omitted winner replays exactly like explicit tie');
+ok(E.view(cfg,omitted).result.winner===null,'omitted winner returns normalized null');
+ok(JSON.stringify(omitted)===omittedBefore,'replay does not alter stored event');
+ok(E.validate(cfg,E.replay(cfg,[]),omitted[0])!==null,'new summary still requires explicit confirmed winner');
+for(const winner of [0,1]){const innings=winner===0?[{runs:43,wkts:1,balls:12},{runs:42,wkts:1,balls:12}]:[{runs:42,wkts:1,balls:12},{runs:43,wkts:1,balls:12}];ok(E.view(cfg,[{t:'completedSummary',innings,winner}]).result.winner===winner,'winner '+winner+' remains unchanged');}
+ok(JSON.stringify(E.view(cfg,omitted.concat({t:'superOver'})))===JSON.stringify(E.view(cfg,tied.concat({t:'superOver'}))),'Super Over identical after Firebase tie round trip');
+console.log('7 Firebase summary regression assertions PASS');
