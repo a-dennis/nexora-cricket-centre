@@ -1142,6 +1142,25 @@ async function handle(req, res) {
     if(legacy&&keyEq(token,legacy.h))await store.setSetting('orgsess',null);
     return send(res, 200, { ok: true });
   }
+  if (p === '/api/auth/keybox' && (req.method === 'GET' || req.method === 'PUT')) {
+    // Opaque, client-encrypted store for the organiser's own link keys (captain and
+    // scorer). The browser encrypts with a key derived from the organiser password;
+    // the server keeps only this ciphertext, so raw keys never reach logs, backups
+    // or public endpoints. Session-gated like other console reads; writes follow the
+    // same reset gate as organiser mutations.
+    if (!(await validOrgSession(req.headers['x-org-session']))) return send(res, 403, { error: 'Sign in as organiser first.' });
+    if (req.method === 'GET') return send(res, 200, { ok: true, box: (await store.getSetting('orgkeybox')) || null });
+    if (await orgResetBlocked(res)) return;
+    const ip = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
+    if (badAuth(ip)) return send(res, 429, { error: 'Too many failed attempts. Try again later.' });
+    const body = await readBody(req, 40000);
+    const box = String((body && body.box) || '');
+    let parsed = null; try { parsed = JSON.parse(box); } catch (e) {}
+    if (!parsed || parsed.v !== 1 || typeof parsed.salt !== 'string' || typeof parsed.iv !== 'string' || typeof parsed.ct !== 'string' || box.length > 30000) return send(res, 400, { error: 'Bad key box' });
+    await store.setSetting('orgkeybox', box);
+    auditOrg('keybox_updated', { ip });
+    return send(res, 200, { ok: true });
+  }
   let mt;
   if (p === '/api/admin/delete-match' || p === '/api/backup' || p === '/api/restore' || p === '/api/admin/tournament-name' || p === '/api/admin/tournament-listed' || p === '/api/admin/replace-matches' || p === '/api/admin/firebase-migrate' || p === '/api/admin/firebase-reconcile' || p === '/api/admin/security-state' || p === '/api/admin/rotate-organiser-keys') {
     // Owner-only. Disabled unless BACKUP_TOKEN is set. Backups contain match data and hashed keys, never raw keys.
