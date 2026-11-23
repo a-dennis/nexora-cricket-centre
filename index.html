@@ -728,7 +728,7 @@ function renderOrg(){
           api('POST','/api/auth/login',{user:v('ogu'),password:v('ogp')}).then(function(r){
             b.disabled=false;
             if(!r.ok){toast((r.j&&r.j.error)||'Wrong username or password');return}
-            orgSetSess(r.j.token);renderOrg();
+            orgSetSess(r.j.token);keyboxUnlock(v('ogp')).then(function(){renderOrg()});
           }).catch(function(){b.disabled=false;toast('No connection. Try again.')});
         };
       }else{
@@ -759,7 +759,7 @@ function renderOrg(){
   api('POST','/api/auth/check',{token:tok}).then(function(r){
     if(!document.body.contains(area))return;
     if(r.ok&&r.j&&r.j.ok&&r.j.resetRequired){renderChangePass(area);return}
-    if(r.ok&&r.j&&r.j.ok){loadOnlineOrgTours().then(function(){if(document.body.contains(area)&&orgSess()===tok)renderOrgArea(area)});return}
+    if(r.ok&&r.j&&r.j.ok){loadOnlineOrgTours().then(keyboxLoad).then(function(ok){if(ok)keyboxCapture();if(document.body.contains(area)&&orgSess()===tok)renderOrgArea(area)});return}
     orgSetSess('');showLogin();
   }).catch(function(){
     if(document.body.contains(area))area.innerHTML='<span class="mut">No connection. Tap Organiser again to retry.</span>';
@@ -797,14 +797,116 @@ function renderChangePass(area){
     api('POST','/api/auth/change-password',{password:pw}).then(function(r){
       b.disabled=false;
       if(!r.ok){toast((r.j&&r.j.error)||'Could not set the password');return}
-      toast('Password changed. Every other device was signed out.',1);renderOrg();
+      var done=function(){toast('Password changed. Every other device was signed out.',1);renderOrg()};
+      // Re-encrypt the stored link keys with the new password so every device keeps working.
+      if(orgKeybox&&orgKeyboxKey){kkDerive(pw,null).then(function(d){orgKeyboxKey=d.raw;orgKeyboxSalt=d.salt;kkStore(d.raw,d.salt);return keyboxSave()}).then(done,done)}else done();
     }).catch(function(){b.disabled=false;toast('No connection. Try again.')});
   };
+}
+/* Organiser link keybox: the captain and scorer links a signed-in organiser can Copy on
+   any device. Keys are encrypted in the browser (AES-GCM; key derived from the organiser
+   password with PBKDF2) and the server stores only the ciphertext, so backups, logs and
+   public endpoints never see a raw key. Without the password-derived key on a device the
+   link rows fall back to the plain reason lines, and the stored box is never overwritten. */
+var orgKeybox=null,orgKeyboxKey=null,orgKeyboxSalt='',orgKeyboxQueue=Promise.resolve();
+function kkB64(b){var s='';new Uint8Array(b).forEach(function(c){s+=String.fromCharCode(c)});return btoa(s)}
+function kkUnb64(s){return Uint8Array.from(atob(s),function(c){return c.charCodeAt(0)})}
+function kkStored(){try{return JSON.parse(localStorage.getItem('org_kk')||'null')}catch(e){return null}}
+function kkStore(raw,salt){try{localStorage.setItem('org_kk',JSON.stringify({raw:raw,salt:salt}))}catch(e){}}
+function kkClear(){orgKeybox=null;orgKeyboxKey=null;orgKeyboxSalt='';try{localStorage.removeItem('org_kk')}catch(e){}}
+function kkAesKey(raw){return crypto.subtle.importKey('raw',kkUnb64(raw),{name:'AES-GCM'},false,['encrypt','decrypt'])}
+function kkDerive(pw,saltB64){
+  var salt=saltB64?kkUnb64(saltB64):crypto.getRandomValues(new Uint8Array(16));
+  return crypto.subtle.importKey('raw',new TextEncoder().encode(pw),'PBKDF2',false,['deriveBits']).then(function(base){
+    return crypto.subtle.deriveBits({name:'PBKDF2',salt:salt,iterations:250000,hash:'SHA-256'},base,256);
+  }).then(function(bits){return {raw:kkB64(bits),salt:kkB64(salt)}});
+}
+function kkEncrypt(obj){
+  var iv=crypto.getRandomValues(new Uint8Array(12));
+  return kkAesKey(orgKeyboxKey).then(function(k){
+    return crypto.subtle.encrypt({name:'AES-GCM',iv:iv},k,new TextEncoder().encode(JSON.stringify(obj)));
+  }).then(function(ct){return JSON.stringify({v:1,salt:orgKeyboxSalt,iv:kkB64(iv),ct:kkB64(ct)})});
+}
+function kkDecrypt(boxStr,raw){
+  var box=JSON.parse(boxStr);
+  return kkAesKey(raw).then(function(k){
+    return crypto.subtle.decrypt({name:'AES-GCM',iv:kkUnb64(box.iv)},k,kkUnb64(box.ct));
+  }).then(function(pt){return JSON.parse(new TextDecoder().decode(pt))});
+}
+function kkEmpty(){return {captain:{},scorer:{}}}
+/* Fetch and decrypt the box with the cached derived key. Safe to call any time; failures
+   leave the box unused (reason lines show) and never overwrite what is stored. */
+function keyboxLoad(){
+  if(!orgSess())return Promise.resolve(false);
+  var st=kkStored();
+  return api('GET','/api/auth/keybox').then(function(r){
+    if(!r.ok)return false;
+    if(!r.j||!r.j.box){orgKeybox=kkEmpty();if(st&&st.raw){orgKeyboxKey=st.raw;orgKeyboxSalt=st.salt||''}return true}
+    if(!st||!st.raw)return false;
+    return kkDecrypt(r.j.box,st.raw).then(function(obj){
+      orgKeybox=obj&&typeof obj==='object'?Object.assign(kkEmpty(),obj):kkEmpty();
+      orgKeyboxKey=st.raw;orgKeyboxSalt=st.salt||'';
+      return true;
+    }).catch(function(){return false});
+  }).catch(function(){return false});
+}
+/* Save the in-memory box, serialized so a match create and a capture never interleave. */
+function keyboxSave(){
+  orgKeyboxQueue=orgKeyboxQueue.then(function(){
+    if(!orgSess()||!orgKeybox||!orgKeyboxKey)return;
+    return kkEncrypt(orgKeybox).then(function(box){
+      return api('PUT','/api/auth/keybox',{box:box});
+    }).then(function(r){if(r&&!r.ok)toast('Could not save the links online. They are still safe on this device.')});
+  }).catch(function(){});
+  return orgKeyboxQueue;
+}
+/* Copy every raw link key this device holds (captain registration keys, scorer keys) into
+   the box, so a signed-in organiser sees them on every other device too. */
+function keyboxCapture(){
+  if(!orgSess())return;
+  if(!orgKeybox){keyboxLoad().then(function(ok){if(ok)keyboxCapture()});return}
+  if(!orgKeyboxKey)return;
+  var dirty=false;
+  tList().forEach(function(t){if(t.regKey&&orgKeybox.captain[t.id]!==t.regKey){orgKeybox.captain[t.id]=t.regKey;dirty=true}});
+  try{
+    for(var i=0;i<localStorage.length;i++){
+      var k=localStorage.key(i);
+      if(k&&k.indexOf('ck_')===0){var val=localStorage.getItem(k);if(val&&orgKeybox.scorer[k.slice(3)]!==val){orgKeybox.scorer[k.slice(3)]=val;dirty=true}}
+    }
+  }catch(e){}
+  if(dirty)keyboxSave();
+}
+/* First unlock on a device, right after a password sign-in: derive the key from the
+   password (reusing the stored salt when a box exists), then pull local keys into it. */
+function keyboxUnlock(pw){
+  return api('GET','/api/auth/keybox').then(function(r){
+    if(!r.ok)return;
+    var existingStr=r.j&&r.j.box?String(r.j.box):'';
+    var existing=null;try{existing=existingStr?JSON.parse(existingStr):null}catch(e){}
+    return kkDerive(pw,existing?existing.salt:null).then(function(d){
+      orgKeyboxKey=d.raw;orgKeyboxSalt=d.salt;kkStore(d.raw,d.salt);
+      if(existingStr){
+        return kkDecrypt(existingStr,d.raw).then(function(obj){
+          orgKeybox=Object.assign(kkEmpty(),obj);
+        }).catch(function(){
+          // The box was written under a different password. Keep it intact; this device
+          // still works, and the next sign-in with the matching password restores the links.
+          orgKeybox=null;orgKeyboxKey=null;
+        });
+      }
+      orgKeybox=kkEmpty();
+    }).then(function(){
+      if(!orgKeybox)return;
+      keyboxCapture();
+      return keyboxSave();
+    });
+  }).catch(function(){});
 }
 function renderOrgArea(area){
   var seen={},items=[];
   tList().forEach(function(t){if(t&&t.id&&!seen[t.id]){seen[t.id]=1;items.push({id:t.id,name:t.name,own:true,regKey:t.regKey||'',key:t.key||''})}});
   knownTs().forEach(function(t){if(t&&t.id&&!seen[t.id]){seen[t.id]=1;items.push({id:t.id,name:t.name})}});
+  (onlineOrgTours||[]).forEach(function(t){if(t&&t.id&&!seen[t.id]){seen[t.id]=1;items.push({id:t.id,name:t.name,online:true,saved:!!t.saved})}});
   var h='<div style="display:flex;justify-content:space-between;align-items:center"><span class="mut">Signed in as <b>denny</b></span><button class="btn sec small" id="ogout">Sign out</button></div>';
   h+='<b style="display:block;margin-top:14px">All links in one spot</b><span class="mut">Tap Open to go straight there, or Copy to send it.</span><div id="lkhome">';
   items.forEach(function(t){
@@ -812,7 +914,7 @@ function renderOrgArea(area){
     h+=lkRow('Live scores & calendar','/t/'+t.id,{share:true});
     if(t.own&&t.regKey)h+=lkRow('Captain team entry','/r/'+t.id+'#r='+t.regKey,{share:true});
     if(t.own)h+=lkRow('Organiser controls (keep private)','/t/'+t.id+'#o='+t.key,{noOpen:true});
-
+    h+='<div class="lkmore" id="lkm-'+esc(t.id)+'"></div>';
   });
   h+='<div class="lkgrp">Everyone</div>'+lkRow('Grand opening ceremony','/launch',{share:true});
   h+='</div>';
@@ -823,7 +925,45 @@ function renderOrgArea(area){
   h+=matchForm()+tourInner();
   area.innerHTML=h;
   wireMatch();wireTour();wirePick();refreshNames();wireNinjaPreview();wireOrgLinks(area,items);loadOrgDevices();
-  document.getElementById('ogout').onclick=function(){var tok=orgSess();orgSetSess('');onlineOrgTours=[];if(tok)api('POST','/api/auth/logout',{token:tok}).catch(function(){});renderOrg()};
+  fillOrgLinksRemote(area,items);
+  document.getElementById('ogout').onclick=function(){var tok=orgSess();orgSetSess('');kkClear();onlineOrgTours=[];if(tok)api('POST','/api/auth/logout',{token:tok}).catch(function(){});renderOrg()};
+}
+/* Captain and scorer links live only on the devices that created them (the server keeps
+   hashes, never raw keys), so a signed-in organiser on any other device used to see just
+   the ceremony link here. Fill each tournament group from the signed-in session: Copy rows
+   for every scorer link this device holds, and a plain reason wherever a key is not here. */
+function fillOrgLinksRemote(area,items){
+  items.forEach(function(t){
+    var box=document.getElementById('lkm-'+t.id);if(!box)return;
+    var note=function(msg){return '<div class="mut" style="margin:4px 0 8px;font-size:12.5px">'+msg+'</div>'};
+    var fail=function(){if(document.body.contains(box))box.innerHTML=note('Could not load captain and scorer links. Check the connection and reopen Organiser.')};
+    api('GET','/api/tournaments/'+t.id,null,t.own?t.key:null).then(function(r){
+      if(!document.body.contains(box))return;
+      if(!r.ok){fail();return}
+      var j=r.j,h='';
+      var canSee=j.pendingTeams!==undefined;
+      if(!(t.own&&t.regKey)){
+        var capKey=orgKeybox?orgKeybox.captain[t.id]:null;
+        if(capKey)h+=lkRow('Captain team entry','/r/'+t.id+'#r='+capKey,{share:true});
+        else if(canSee)h+=j.registration==='open'?note('Captain team entry: registration is open. Its link is saved on the device that created it - Copy it there. A fresh link made under Team registrations disables the old one.'):note('Captain registration is closed for this tournament.');
+        else h+=note('Captain team entry: open this tournament\'s private organiser link on this device once to manage its registration link here.');
+      }
+      var ms=(j.matches||[]).slice().sort(function(a,b){return (b.date||'').localeCompare(a.date||'')});
+      var missing=[];
+      ms.forEach(function(m){
+        var k=null;try{k=localStorage.getItem('ck_'+m.id)}catch(e){}
+        if(!k&&orgKeybox)k=orgKeybox.scorer[m.id]||null;
+        if(k)h+=lkRow('Scorer link - '+(m.title||m.teams.join(' vs ')),'/m/'+m.id+'#k='+k);
+        else missing.push(m);
+      });
+      if(missing.length){
+        var names=missing.slice(0,3).map(function(m){return esc(m.title||m.teams.join(' vs '))}).join(', ')+(missing.length>3?' and '+(missing.length-3)+' more':'');
+        h+=note('Scorer link - '+names+': saved on the device that created the match. Copy it there, or open the match on that device and share it.');
+      }
+      if(!ms.length)h+=note('No matches in this tournament yet.');
+      box.innerHTML=h;
+    }).catch(fail);
+  });
 }
 function loadOrgDevices(){
   var box=document.getElementById('ogdev');if(!box)return;
@@ -1143,7 +1283,7 @@ function renderT(){
   var nr=document.getElementById('nreg');if(nr&&manage)nr.onclick=function(){nr.disabled=true;var rk=randKey(14);
     api('POST','/api/tournaments/'+id+'/reglink',{regKey:rk},(own?own.key:null)).then(function(r){nr.disabled=false;
       if(!r.ok){toast(r.j.error||'Could not create link');return}
-      tSetReg(id,rk);loadT(true);toast('Registration link ready - copy and share it',1)}).catch(function(){nr.disabled=false;toast('No connection. Try again.')})};
+      tSetReg(id,rk);keyboxCapture();loadT(true);toast('Registration link ready - copy and share it',1)}).catch(function(){nr.disabled=false;toast('No connection. Try again.')})};
   Array.prototype.forEach.call(document.querySelectorAll('[data-tap]'),function(b){b.onclick=function(){b.disabled=true;api('POST','/api/tournaments/'+id+'/teams/'+b.dataset.tap,{action:'approve'},(own?own.key:null)).then(function(r){b.disabled=false;if(!r.ok){toast(r.j.error||'Could not approve');return}toast('Team approved',1);loadT(true)}).catch(function(){b.disabled=false;toast('No connection. Try again.')})}});
   Array.prototype.forEach.call(document.querySelectorAll('[data-trm]'),function(b){b.onclick=function(){if(!confirm('Remove this team?'))return;api('POST','/api/tournaments/'+id+'/teams/'+b.dataset.trm,{action:'remove'},(own?own.key:null)).then(function(r){if(!r.ok){toast(r.j.error||'Could not remove');return}toast('Team removed',1);loadT(true)}).catch(function(){toast('No connection. Try again.')})}});
   Array.prototype.forEach.call(document.querySelectorAll('[data-rlm]'),function(b){b.onclick=function(){var pr=b.getAttribute('data-rlm').split(':');b.disabled=true;api('POST','/api/tournaments/'+id+'/teams/'+pr[0],{action:'role',player:+pr[1],role:pr[2]},(own?own.key:null)).then(function(r){b.disabled=false;if(!r.ok){toast(r.j.error||'Could not update');return}loadT(true)}).catch(function(){b.disabled=false;toast('No connection. Try again.')})}});
@@ -1184,6 +1324,7 @@ document.addEventListener('click',function(e){
 function showCreated(j){
   var vu=location.origin+j.viewerPath, su=location.origin+j.scorerPath+'#k='+j.scorerKey;
   try{localStorage.setItem('ck_'+j.id,j.scorerKey)}catch(e){}
+  keyboxCapture();
   app.innerHTML='<div class="top"><b class="brand"><i class="mark"></i>KCL (KPD Cricket League)</b><span></span></div><h2>Match created</h2>'+
   '<div class="card"><h1 style="margin-top:0">1. Share this with everyone (view only)</h1><div class="link" id="vu">'+esc(vu)+'</div>'+
   '<div class="grid" style="grid-template-columns:1fr 1fr"><button class="btn sec" id="cv">Copy</button><button class="btn sec" id="sv">Share</button></div></div>'+
@@ -1720,6 +1861,7 @@ else{
   if(mode==='s'){
     var m=location.hash.match(/k=([A-Za-z0-9]+)/);
     try{if(m){localStorage.setItem('ck_'+id,m[1]);history.replaceState(null,'',location.pathname)}key=localStorage.getItem('ck_'+id)}catch(e){key=m?m[1]:null}
+    if(m)keyboxCapture();
   }
   render();load(true);
 
