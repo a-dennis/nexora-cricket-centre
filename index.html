@@ -949,21 +949,15 @@ function fillOrgLinksRemote(area,items){
       if(!(t.own&&t.regKey)){
         var capKey=orgKeybox?orgKeybox.captain[t.id]:null;
         if(capKey)h+=lkRow('Captain team entry','/r/'+t.id+'#r='+capKey,{share:true});
-        else if(canSee)h+=j.registration==='open'?note('Captain team entry: registration is open. Its link is saved on the device that created it - Copy it there. A fresh link made under Team registrations disables the old one.'):note('Captain registration is closed for this tournament.');
+        else if(canSee)h+=j.registration==='open'?note('Captain team entry: registration is open. Sign out of Organiser and sign in once with your password on this device - the link then stays here. A fresh link made under Team registrations disables the old one.'):note('Captain registration is closed for this tournament.');
         else h+=note('Captain team entry: open this tournament\'s private organiser link on this device once to manage its registration link here.');
       }
       var ms=(j.matches||[]).slice().sort(function(a,b){return (b.date||'').localeCompare(a.date||'')});
-      var missing=[];
       ms.forEach(function(m){
         var k=null;try{k=localStorage.getItem('ck_'+m.id)}catch(e){}
         if(!k&&orgKeybox)k=orgKeybox.scorer[m.id]||null;
         if(k)h+=lkRow('Scorer link - '+(m.title||m.teams.join(' vs ')),'/m/'+m.id+'#k='+k);
-        else missing.push(m);
       });
-      if(missing.length){
-        var names=missing.slice(0,3).map(function(m){return esc(m.title||m.teams.join(' vs '))}).join(', ')+(missing.length>3?' and '+(missing.length-3)+' more':'');
-        h+=note('Scorer link - '+names+': saved on the device that created the match. Copy it there, or open the match on that device and share it.');
-      }
       if(!ms.length)h+=note('No matches in this tournament yet.');
       box.innerHTML=h;
     }).catch(fail);
