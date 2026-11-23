@@ -1239,13 +1239,13 @@ function renderT(){
   var sessOwn=!ownL&&T.pendingTeams!==undefined;
   if(ownL||sessOwn){
     h+='<div class="lkgrp">Only you see these (organiser device)</div>';
-    if(T.registration==='open'&&ownL&&ownL.regKey)h+=lkRow('Captain team entry','/r/'+id+'#r='+ownL.regKey,{share:true});
-    else if(T.registration==='open')h+='<div class="mut" style="margin-top:8px;font-size:12.5px">Captain registration is open, but its link is saved on the device that created it. You can make a new one under Team registrations below.</div>';
+    var capK=ownL&&ownL.regKey?ownL.regKey:(orgKeybox?orgKeybox.captain[id]:null);
+    if(T.registration==='open'&&capK)h+=lkRow('Captain team entry','/r/'+id+'#r='+capK,{share:true});
+    else if(T.registration==='open')h+='<div class="mut" style="margin-top:8px;font-size:12.5px">Captain registration is open. Sign in once on the Organiser tab of the home page - the link then stays here and on your other devices.</div>';
     else h+='<div class="mut" style="margin-top:8px;font-size:12.5px">Captain registration link not created yet - make one under Team registrations below.</div>';
 
-    var sks=(T.matches||[]).map(function(m){var k=null;try{k=localStorage.getItem('ck_'+m.id)}catch(e){}return k?{id:m.id,title:m.title,key:k}:null}).filter(Boolean);
+    var sks=(T.matches||[]).map(function(m){var k=null;try{k=localStorage.getItem('ck_'+m.id)}catch(e){}if(!k&&orgKeybox)k=orgKeybox.scorer[m.id]||null;return k?{id:m.id,title:m.title,key:k}:null}).filter(Boolean);
     if(sks.length)h+=sks.map(function(s){return lkRow('Scorer link - '+s.title,'/m/'+s.id+'#k='+s.key)}).join('');
-    else h+='<div class="mut" style="margin-top:8px;font-size:12.5px">Scorer links are saved on the device that created each match - a new match shows its scorer link once, at creation.</div>';
     if(ownL)h+=lkRow('Private organiser link','/t/'+id+'#o='+ownL.key,{noOpen:true});
     else h+='<button class="btn sec" id="mintorg" style="margin-top:8px">Create a new private organiser link (old ones stop working)</button>';
     h+='<div class="mut" style="font-size:12.5px;margin-top:6px">Keep the organiser and scorer links private - anyone with them can control the tournament. The registration link is the one to send captains.</div>';
@@ -1263,7 +1263,7 @@ function renderT(){
   if(T.teams&&T.teams.length){h+='<h1>Teams</h1>'+T.teams.map(function(tm){return '<div class="card"><b>'+esc(tm.name)+'</b><div class="mut" style="margin-top:4px">'+tm.players.map(esc).join(', ')+'</div></div>'}).join('')}
   if(manage){
     h+='<h1>Team registrations</h1><div class="card"><div class="mut">Share one link with all team captains. Each captain enters their team name and players. You approve a team before it shows in the app.</div>';
-    if(T.registration==='open'&&!(own&&own.regKey))h+='<div class="mut" style="margin-top:8px">Registration is open. The link is on the device that created it, or make a new one here.</div>';
+    if(T.registration==='open'&&!(own&&own.regKey)&&!(orgKeybox&&orgKeybox.captain[id]))h+='<div class="mut" style="margin-top:8px">Registration is open. Sign in once on the Organiser tab of the home page to load the link here, or make a new one.</div>';
     h+='<button class="btn sec" id="nreg" style="margin-top:10px">'+(T.registration==='open'?'Create new link (disables the old one)':'Create registration link')+'</button>';
     var pend=T.pendingTeams||[];
     h+='<h1>Waiting for approval ('+pend.length+')</h1>';
@@ -1850,7 +1850,7 @@ else if(mode==='t'&&new URLSearchParams(location.search).get('roster')==='1'){ro
 else if(mode==='t'){
   var om=location.hash.match(/o=([A-Za-z0-9]+)/);
   if(om){history.replaceState(null,'',location.pathname);fetch('/api/tournaments/'+id).then(function(r){return r.json()}).then(function(j){if(j&&j.name){tSave({id:id,name:j.name,key:om[1]});renderT()}})}
-  renderT();loadT(true);setInterval(loadT,15000);
+  renderT();loadT(true);keyboxLoad().then(function(ok){if(ok)renderT()});setInterval(loadT,15000);
   fbLive('tournaments/'+id,function(){loadT()});
   document.addEventListener('visibilitychange',function(){if(!document.hidden)loadT()});
 }
