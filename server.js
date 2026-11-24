@@ -1030,13 +1030,18 @@ const MAX_TOURNAMENTS = 100, MAX_PER_TOURNAMENT = 200, MAX_TEAMS_PER_TOURNAMENT 
 const MIN_TEAM_PLAYERS = 2; // minimum players per registered team (organiser policy; raise to 15 if every slot is mandatory)
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.json': 'application/json', '.webmanifest': 'application/manifest+json' };
 const STATIC_OK = new Set(['index.html','camera.html','invite.html']);
+// App version: hash of index.html on disk. Injected into served HTML as a meta tag
+// and exposed at /api/version so open tabs can detect a new deploy and reload once.
+const INDEX_RAW = fs.readFileSync(path.join(PUB, 'index.html'));
+const INDEX_VER = crypto.createHash('sha256').update(INDEX_RAW).digest('hex').slice(0, 16);
+const INDEX_SERVED = Buffer.from(INDEX_RAW.toString('utf8').replace('</head>', '<meta name="app-ver" content="' + INDEX_VER + '"></head>'));
 function serveStatic(res, rel) {
   if (!STATIC_OK.has(rel)) { res.writeHead(404, { 'content-type': 'text/plain' }); return res.end('Not found'); }
   const f = path.join(PUB, rel);
   fs.readFile(f, (e, d) => {
     if (e) { res.writeHead(404, { 'content-type': 'text/plain' }); return res.end('Not found'); }
-    res.writeHead(200, { 'content-type': MIME[path.extname(f)] || 'application/octet-stream', 'cache-control': 'no-cache', 'x-content-type-options': 'nosniff' });
-    res.end(d);
+    res.writeHead(200, { 'content-type': MIME[path.extname(f)] || 'application/octet-stream', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' });
+    res.end(rel === 'index.html' ? INDEX_SERVED : d);
   });
 }
 
@@ -1045,6 +1050,7 @@ async function handle(req, res) {
   const p = url.pathname;
   if (p === '/healthz') return send(res, 200, { ok: true, storage: store.kind });
   if (p === '/api/info') return send(res, 200, { storage: store.kind });
+  if (p === '/api/version') return send(res, 200, { v: INDEX_VER });
 
   // ---------- organiser sign-in for the main-screen organiser area ----------
   if (p === '/api/auth/status' && req.method === 'GET') {
