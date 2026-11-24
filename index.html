@@ -360,6 +360,28 @@ label,.sub,.rolepane{color:#887655}.card:before{background:linear-gradient(90deg
 
 (function(){
 'use strict';
+// Auto-update: the server stamps this page with its build hash (meta app-ver) and
+// answers /api/version. When an open tab notices a newer build, it reloads once so
+// no device keeps running stale HTML. Skips while typing, retries after 60s.
+var APP_VER=(document.querySelector('meta[name="app-ver"]')||{}).content||'';
+var _verCheckedAt=0;
+function appVerCheck(){
+  if(!APP_VER)return;
+  var now=Date.now();
+  if(now-_verCheckedAt<60000)return;
+  _verCheckedAt=now;
+  fetch('/api/version',{cache:'no-store'}).then(function(r){return r.ok?r.json():null}).then(function(j){
+    if(j&&j.v&&j.v!==APP_VER){
+      try{if(sessionStorage.getItem('ver_reloaded')===j.v)return;sessionStorage.setItem('ver_reloaded',j.v)}catch(e){}
+      var ae=document.activeElement;
+      if(ae&&(ae.tagName==='INPUT'||ae.tagName==='TEXTAREA')){_verCheckedAt=0;return}
+      location.reload();
+    }
+  }).catch(function(){});
+}
+window.addEventListener('focus',appVerCheck);
+document.addEventListener('visibilitychange',function(){if(!document.hidden)appVerCheck()});
+setTimeout(appVerCheck,9000);
 var app=document.getElementById('app');
 var path=location.pathname;
 var mm=path.match(/^\/(m|s|t|r)\/([a-z0-9]+)/);
@@ -917,8 +939,10 @@ function renderOrgArea(area){
     h+='<div class="lkgrp" id="lkg-'+esc(t.id)+'">'+esc(t.name)+'</div>';
     h+=lkRow('Live scores & calendar','/t/'+t.id,{share:true});
     if(t.own&&t.regKey)h+=lkRow('Captain team entry','/r/'+t.id+'#r='+t.regKey,{share:true});
+    h+='<div class="lkcap" id="lkc-'+esc(t.id)+'"></div>';
+    h+='<details class="lkpriv"><summary style="cursor:pointer;font-size:13px;margin:10px 0 4px">Scorer &amp; organiser links (keep private)</summary>';
     if(t.own)h+=lkRow('Organiser controls (keep private)','/t/'+t.id+'#o='+t.key,{noOpen:true});
-    h+='<div class="lkmore" id="lkm-'+esc(t.id)+'"></div>';
+    h+='<div class="lkmore" id="lkm-'+esc(t.id)+'"></div></details>';
   });
   h+='<div class="lkgrp">Everyone</div>'+lkRow('Grand opening ceremony','/launch',{share:true});
   h+='</div>';
@@ -938,19 +962,19 @@ function renderOrgArea(area){
    for every scorer link this device holds, and a plain reason wherever a key is not here. */
 function fillOrgLinksRemote(area,items){
   items.forEach(function(t){
-    var box=document.getElementById('lkm-'+t.id);if(!box)return;
+    var box=document.getElementById('lkm-'+t.id),capBox=document.getElementById('lkc-'+t.id);if(!box)return;
     var note=function(msg){return '<div class="mut" style="margin:4px 0 8px;font-size:12.5px">'+msg+'</div>'};
     var fail=function(){if(document.body.contains(box))box.innerHTML=note('Could not load captain and scorer links. Check the connection and reopen Organiser.')};
     api('GET','/api/tournaments/'+t.id,null,t.own?t.key:null).then(function(r){
       if(!document.body.contains(box))return;
       if(!r.ok){fail();return}
-      var j=r.j,h='';
+      var j=r.j,h='',ch='';
       var canSee=j.pendingTeams!==undefined;
       if(!(t.own&&t.regKey)){
         var capKey=orgKeybox?orgKeybox.captain[t.id]:null;
-        if(capKey)h+=lkRow('Captain team entry','/r/'+t.id+'#r='+capKey,{share:true});
-        else if(canSee)h+=j.registration==='open'?note('Captain team entry: registration is open. Sign out of Organiser and sign in once with your password on this device - the link then stays here. A fresh link made under Team registrations disables the old one.'):note('Captain registration is closed for this tournament.');
-        else h+=note('Captain team entry: open this tournament\'s private organiser link on this device once to manage its registration link here.');
+        if(capKey)ch+=lkRow('Captain team entry','/r/'+t.id+'#r='+capKey,{share:true});
+        else if(canSee)ch+=j.registration==='open'?note('Captain team entry: registration is open. Sign out of Organiser and sign in once with your password on this device - the link then stays here. A fresh link made under Team registrations disables the old one.'):note('Captain registration is closed for this tournament.');
+        else ch+=note('Captain team entry: open this tournament\'s private organiser link on this device once to manage its registration link here.');
       }
       var ms=(j.matches||[]).slice().sort(function(a,b){return (b.date||'').localeCompare(a.date||'')});
       ms.forEach(function(m){
@@ -959,6 +983,7 @@ function fillOrgLinksRemote(area,items){
         if(k)h+=lkRow('Scorer link - '+(m.title||m.teams.join(' vs ')),'/m/'+m.id+'#k='+k);
       });
       if(!ms.length)h+=note('No matches in this tournament yet.');
+      if(capBox)capBox.innerHTML=ch;
       box.innerHTML=h;
     }).catch(fail);
   });
@@ -1244,11 +1269,12 @@ function renderT(){
     else if(T.registration==='open')h+='<div class="mut" style="margin-top:8px;font-size:12.5px">Captain registration is open. Sign in once on the Organiser tab of the home page - the link then stays here and on your other devices.</div>';
     else h+='<div class="mut" style="margin-top:8px;font-size:12.5px">Captain registration link not created yet - make one under Team registrations below.</div>';
 
+    h+='<details class="lkpriv"><summary style="cursor:pointer;font-size:13px;margin:10px 0 4px">Scorer &amp; organiser links (keep private)</summary>';
     var sks=(T.matches||[]).map(function(m){var k=null;try{k=localStorage.getItem('ck_'+m.id)}catch(e){}if(!k&&orgKeybox)k=orgKeybox.scorer[m.id]||null;return k?{id:m.id,title:m.title,key:k}:null}).filter(Boolean);
     if(sks.length)h+=sks.map(function(s){return lkRow('Scorer link - '+s.title,'/m/'+s.id+'#k='+s.key)}).join('');
     if(ownL)h+=lkRow('Private organiser link','/t/'+id+'#o='+ownL.key,{noOpen:true});
     else h+='<button class="btn sec" id="mintorg" style="margin-top:8px">Create a new private organiser link (old ones stop working)</button>';
-    h+='<div class="mut" style="font-size:12.5px;margin-top:6px">Keep the organiser and scorer links private - anyone with them can control the tournament. The registration link is the one to send captains.</div>';
+    h+='<div class="mut" style="font-size:12.5px;margin-top:6px">Keep the organiser and scorer links private - anyone with them can control the tournament. The registration link is the one to send captains.</div></details>';
   }
   h+='</div>';
   h+='<div class="tcal"><div class="tl"><div class="card"><div class="row" style="margin-bottom:10px"><button class="nav" id="pm" aria-label="Previous month">‹</button><b style="font-size:17px">'+MON[mo]+' '+y+'</b><button class="nav" id="nm" aria-label="Next month">›</button></div><div class="cal">';
