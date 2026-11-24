@@ -889,11 +889,12 @@ function keyboxCapture(){
   if(!orgKeybox){keyboxLoad().then(function(ok){if(ok)keyboxCapture()});return}
   if(!orgKeyboxKey)return;
   var dirty=false;
-  tList().forEach(function(t){if(t.regKey&&orgKeybox.captain[t.id]!==t.regKey){orgKeybox.captain[t.id]=t.regKey;dirty=true}});
+  // Add-only: a device never overwrites a key the box already holds (a stale local copy must not clobber the good one). Rotation sets the box explicitly below.
+  tList().forEach(function(t){if(t.regKey&&!orgKeybox.captain[t.id]){orgKeybox.captain[t.id]=t.regKey;dirty=true}});
   try{
     for(var i=0;i<localStorage.length;i++){
       var k=localStorage.key(i);
-      if(k&&k.indexOf('ck_')===0){var val=localStorage.getItem(k);if(val&&orgKeybox.scorer[k.slice(3)]!==val){orgKeybox.scorer[k.slice(3)]=val;dirty=true}}
+      if(k&&k.indexOf('ck_')===0){var val=localStorage.getItem(k);if(val&&!orgKeybox.scorer[k.slice(3)]){orgKeybox.scorer[k.slice(3)]=val;dirty=true}}
     }
   }catch(e){}
   if(dirty)keyboxSave();
@@ -1307,7 +1308,7 @@ function renderT(){
   var nr=document.getElementById('nreg');if(nr&&manage)nr.onclick=function(){nr.disabled=true;var rk=randKey(14);
     api('POST','/api/tournaments/'+id+'/reglink',{regKey:rk},(own?own.key:null)).then(function(r){nr.disabled=false;
       if(!r.ok){toast(r.j.error||'Could not create link');return}
-      tSetReg(id,rk);keyboxCapture();loadT(true);toast('Registration link ready - copy and share it',1)}).catch(function(){nr.disabled=false;toast('No connection. Try again.')})};
+      tSetReg(id,rk);if(orgKeybox){orgKeybox.captain[id]=rk;keyboxSave()}else keyboxCapture();loadT(true);toast('Registration link ready - copy and share it',1)}).catch(function(){nr.disabled=false;toast('No connection. Try again.')})};
   Array.prototype.forEach.call(document.querySelectorAll('[data-tap]'),function(b){b.onclick=function(){b.disabled=true;api('POST','/api/tournaments/'+id+'/teams/'+b.dataset.tap,{action:'approve'},(own?own.key:null)).then(function(r){b.disabled=false;if(!r.ok){toast(r.j.error||'Could not approve');return}toast('Team approved',1);loadT(true)}).catch(function(){b.disabled=false;toast('No connection. Try again.')})}});
   Array.prototype.forEach.call(document.querySelectorAll('[data-trm]'),function(b){b.onclick=function(){if(!confirm('Remove this team?'))return;api('POST','/api/tournaments/'+id+'/teams/'+b.dataset.trm,{action:'remove'},(own?own.key:null)).then(function(r){if(!r.ok){toast(r.j.error||'Could not remove');return}toast('Team removed',1);loadT(true)}).catch(function(){toast('No connection. Try again.')})}});
   Array.prototype.forEach.call(document.querySelectorAll('[data-rlm]'),function(b){b.onclick=function(){var pr=b.getAttribute('data-rlm').split(':');b.disabled=true;api('POST','/api/tournaments/'+id+'/teams/'+pr[0],{action:'role',player:+pr[1],role:pr[2]},(own?own.key:null)).then(function(r){b.disabled=false;if(!r.ok){toast(r.j.error||'Could not update');return}loadT(true)}).catch(function(){b.disabled=false;toast('No connection. Try again.')})}});
